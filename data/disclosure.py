@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from typing import List, Dict, Set
 
-import httpx
+from curl_cffi import requests
 import pytz
 
 from config import IDX_ANNOUNCEMENT_URL, IDX_HEADERS, TIMEZONE
@@ -41,13 +41,13 @@ def fetch_disclosures(page_size: int = 20) -> List[Dict]:
 
     for endpoint in endpoints:
         try:
-            with httpx.Client(timeout=15, follow_redirects=True) as client:
-                resp = client.get(endpoint, headers=IDX_HEADERS)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    return _parse_announcements(data)
-                logger.warning("IDX endpoint %s → HTTP %s", endpoint, resp.status_code)
-                time.sleep(1)
+            # Menggunakan curl_cffi untuk bypass blokir Cloudflare
+            resp = requests.get(endpoint, headers=IDX_HEADERS, impersonate="chrome110", timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                return _parse_announcements(data)
+            logger.warning("IDX endpoint %s → HTTP %s", endpoint, resp.status_code)
+            time.sleep(1)
         except Exception as e:
             logger.error("Error fetch disclosure dari %s: %s", endpoint, e)
             time.sleep(1)

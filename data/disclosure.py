@@ -41,8 +41,7 @@ def fetch_disclosures(page_size: int = 20) -> List[Dict]:
 
     for endpoint in endpoints:
         try:
-            # Menggunakan curl_cffi untuk bypass blokir Cloudflare
-            resp = requests.get(endpoint, headers=IDX_HEADERS, impersonate="chrome110", timeout=15)
+            resp = requests.get(endpoint, impersonate="chrome120", timeout=15)
             if resp.status_code == 200:
                 data = resp.json()
                 return _parse_announcements(data)
@@ -60,24 +59,37 @@ def _parse_announcements(data) -> List[Dict]:
     """Parse JSON response dari IDX ke list dict terstandar."""
     items = []
 
-    # IDX API biasanya punya struktur: {"Rows": [...]} atau {"data": [...]}
     rows = []
     if isinstance(data, dict):
-        rows = data.get("Rows", data.get("data", data.get("rows", [])))
+        rows = data.get("Replies", data.get("Rows", data.get("data", data.get("rows", []))))
     elif isinstance(data, list):
         rows = data
 
     for row in rows:
         try:
-            item = {
-                "id":       str(row.get("Kode", row.get("code", row.get("No", "")))),
-                "emiten":   row.get("KodeEmiten", row.get("stock_code", row.get("Emiten", ""))),
-                "title":    row.get("Judul", row.get("title", row.get("Title", ""))),
-                "date":     row.get("Tanggal", row.get("date", row.get("Date", ""))),
-                "category": row.get("Kategori", row.get("category", row.get("Category", ""))),
-                "url":      _build_attachment_url(row),
-            }
-            if item["title"] or item["emiten"]:
+            # Format baru (Replies -> pengumuman)
+            if "pengumuman" in row:
+                p = row["pengumuman"]
+                item = {
+                    "id": str(p.get("Id2", p.get("Id", ""))),
+                    "emiten": p.get("Kode_Emiten", "").strip(),
+                    "title": p.get("JudulPengumuman", "").strip(),
+                    "date": p.get("TglPengumuman", ""),
+                    "category": p.get("JenisPengumuman", ""),
+                    "url": _build_attachment_url(row),
+                }
+            # Format lama (jika fallback ke struktur sebelumnya)
+            else:
+                item = {
+                    "id": str(row.get("Kode", row.get("code", row.get("No", "")))),
+                    "emiten": row.get("KodeEmiten", row.get("stock_code", row.get("Emiten", ""))),
+                    "title": row.get("Judul", row.get("title", row.get("Title", ""))),
+                    "date": row.get("Tanggal", row.get("date", row.get("Date", ""))),
+                    "category": row.get("Kategori", row.get("category", row.get("Category", ""))),
+                    "url": _build_attachment_url(row),
+                }
+
+            if item.get("title") or item.get("emiten"):
                 items.append(item)
         except Exception as e:
             logger.debug("Gagal parse row: %s | %s", row, e)
@@ -87,6 +99,14 @@ def _parse_announcements(data) -> List[Dict]:
 
 def _build_attachment_url(row: dict) -> str:
     """Bangun URL lampiran PDF/dokumen dari field attachment."""
+    # Struktur baru
+    attachments = row.get("attachments", [])
+    if attachments and isinstance(attachments, list) and len(attachments) > 0:
+        attach = attachments[0].get("FullSavePath", "")
+        if attach:
+            return attach
+
+    # Struktur lama
     attach = row.get("Attachment", row.get("attachment", row.get("File", "")))
     if attach and isinstance(attach, str) and attach.strip():
         if attach.startswith("http"):

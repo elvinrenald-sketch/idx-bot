@@ -19,16 +19,22 @@ WIB = pytz.timezone(TIMEZONE)
 
 def fetch_disclosures(page_size: int = 30) -> List[Dict]:
     """
-    Fetch IDX disclosures with 3-endpoint fallback + retry logic.
+    Fetch IDX disclosures with 3-endpoint fallback + proxy routing + retry logic.
     Returns list of standardized dicts, or empty list on total failure.
     """
     endpoints = [
+        # 1. Direct routes (Works on local residential IPs)
         f"https://www.idx.co.id/primary/ListedCompany/GetAnnouncement"
         f"?indexFrom=0&pageSize={page_size}&lang=id",
-
+        
         f"https://www.idx.co.id/primary/ListedCompany/GetAnnouncement"
         f"?indexFrom=0&pageSize={page_size}",
 
+        # 2. CORS Proxy routes (Bypasses Cloudflare Datacenter block on Railway)
+        f"https://cors.eu.org/https://www.idx.co.id/primary/ListedCompany/GetAnnouncement"
+        f"?indexFrom=0&pageSize={page_size}&lang=id",
+        
+        # 3. Legacy endpoint
         f"https://www.idx.co.id/umbraco/Surface/ListedCompany/GetAnnouncement"
         f"?indexFrom=0&pageSize={page_size}&lang=id",
     ]

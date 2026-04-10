@@ -3,6 +3,7 @@ bot/handlers.py — Telegram command handlers for IDX Intelligence Bot v2.0
 Commands: /start, /help, /ihsg, /disclosure, /signals, /news, /anomaly, /watchlist, /status
 """
 import logging
+import asyncio
 from datetime import datetime
 
 from telegram import Update
@@ -69,7 +70,6 @@ def _split_message(text: str, max_len: int = MAX_MSG_LEN) -> list:
             chunks.append(text)
             break
 
-        # Find a good split point (newline or space)
         split_at = text.rfind("\n", 0, max_len)
         if split_at < max_len // 2:
             split_at = text.rfind(" ", 0, max_len)
@@ -91,18 +91,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     chat_id = update.effective_chat.id
 
-    # Persist chat_id to both bot_data and database
     if "chat_ids" not in context.bot_data:
         context.bot_data["chat_ids"] = set()
     context.bot_data["chat_ids"].add(chat_id)
 
-    # Save to database
     db = context.bot_data.get("db")
     if db:
-        db.set_chat_id(chat_id)
+        await asyncio.to_thread(db.set_chat_id, chat_id)
 
     logger.info("User %s (%d) started bot", user.first_name, chat_id)
-
     await _send_long(update, fmt_welcome(user.first_name))
 
 
@@ -114,20 +111,20 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_ihsg(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler /ihsg — fetch IHSG data from multi-source."""
     await update.message.reply_text("⏳ Mengambil data IHSG (multi-sumber)…")
+    logger.info("Processing /ihsg")
 
-    data = fetch_ihsg()
+    data = await asyncio.to_thread(fetch_ihsg)
     msg = fmt_ihsg(data)
-
     await _send_long(update, msg)
 
 
 async def cmd_disclosure(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler /disclosure — latest disclosures."""
     await update.message.reply_text("⏳ Mengambil keterbukaan informasi IDX…")
+    logger.info("Processing /disclosure")
 
-    disclosures = fetch_disclosures(page_size=20)
+    disclosures = await asyncio.to_thread(fetch_disclosures, 20)
     msg = fmt_disclosures(disclosures, max_items=10)
-
     await _send_long(update, msg)
 
 
@@ -137,13 +134,15 @@ async def cmd_signals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "⏳ Menjalankan deteksi sinyal AI…\n"
         "📊 Keyword + 🧠 Gemini AI + 📈 Anomali + 📰 Berita"
     )
+    logger.info("Processing /signals")
 
     db = context.bot_data.get("db")
     engine = context.bot_data.get("engine")
 
     # 1. Fetch disclosures
-    disclosures = fetch_disclosures(page_size=50)
+    disclosures = await asyncio.to_thread(fetch_disclosures, 50)
     if not disclosures:
+        logger.warning("/signals failed: No disclosures fetched.")
         await _send_long(
             update,
             fmt_error("Gagal mengambil data disclosure dari IDX. Coba beberapa saat lagi."),
@@ -153,28 +152,24 @@ async def cmd_signals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     # 2. Fetch news
     news = []
     try:
-        news = scan_all_news()
+        news = await asyncio.to_thread(scan_all_news)
     except Exception as e:
         logger.warning("News scan failed in /signals: %s", e)
 
     # 3. Fetch anomalies
     anomalies = []
     try:
-        price_data = fetch_stock_data(WATCHLIST_TICKERS[:20])
+        price_data = await asyncio.to_thread(fetch_stock_data, WATCHLIST_TICKERS[:20])
         if db:
             from intelligence.anomaly import AnomalyDetector
             detector = AnomalyDetector(db)
-            anomalies = detector.scan(price_data)
+            anomalies = await asyncio.to_thread(detector.scan, price_data)
     except Exception as e:
         logger.warning("Anomaly detection failed in /signals: %s", e)
 
     # 4. Run full detection
-    signals = detect_signals(
-        disclosures=disclosures,
-        news_articles=news,
-        anomalies=anomalies,
-        engine=engine,
-        db=db,
+    signals = await asyncio.to_thread(
+        detect_signals, disclosures, news, anomalies, engine, db
     )
 
     msg = fmt_signal_alert(signals)
@@ -184,9 +179,10 @@ async def cmd_signals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def cmd_news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler /news — scan financial news."""
     await update.message.reply_text("⏳ Scanning berita CNBC/Kontan/Bisnis…")
+    logger.info("Processing /news")
 
     try:
-        articles = scan_all_news()
+        articles = await asyncio.to_thread(scan_all_news)
         msg = fmt_news_report(articles, max_items=10)
     except Exception as e:
         logger.error("News scan failed: %s", e)
@@ -198,20 +194,18 @@ async def cmd_news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_anomaly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler /anomaly — detect price/volume anomalies."""
     await update.message.reply_text("⏳ Scanning anomali harga & volume…")
+    logger.info("Processing /anomaly")
 
     db = context.bot_data.get("db")
-
     try:
-        price_data = fetch_stock_data(WATCHLIST_TICKERS)
-
+        price_data = await asyncio.to_thread(fetch_stock_data, WATCHLIST_TICKERS)
         if db:
             from intelligence.anomaly import AnomalyDetector
             detector = AnomalyDetector(db)
-            anomalies = detector.scan(price_data)
+            anomalies = await asyncio.to_thread(detector.scan, price_data)
             msg = fmt_anomaly_report(anomalies)
         else:
             msg = fmt_error("Database belum siap. Coba lagi nanti.")
-
     except Exception as e:
         logger.error("Anomaly detection failed: %s", e)
         msg = fmt_error(f"Gagal deteksi anomali: {e}")

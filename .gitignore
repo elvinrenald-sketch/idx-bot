@@ -1,11 +1,11 @@
-.env
+# IDX Intelligence Bot
 __pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-.venv/
-venv/
-env/
+*.pyc
+*.pyo
+.env
+local_data/
+*.db
 *.log
 .DS_Store
+venv/
+.venv/

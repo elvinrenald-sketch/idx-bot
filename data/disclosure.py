@@ -1,62 +1,80 @@
 """
-data/disclosure.py — Scrape IDX keterbukaan informasi
+data/disclosure.py — IDX disclosure fetcher with retry + fallback + persistence
+No more in-memory _seen_ids — everything persisted to SQLite.
 """
 import logging
 import time
+import re
 from datetime import datetime
-from typing import List, Dict, Set
+from typing import List, Dict
 
 from curl_cffi import requests
 import pytz
 
-from config import IDX_ANNOUNCEMENT_URL, IDX_HEADERS, TIMEZONE
+from config import IDX_HEADERS, TIMEZONE
 
 logger = logging.getLogger("idx_bot.disclosure")
 WIB = pytz.timezone(TIMEZONE)
 
-# In-memory cache: set of seen disclosure IDs to prevent duplicate alerts
-_seen_ids: Set[str] = set()
-_MAX_CACHE = 500  # reset kalau terlalu besar
 
-
-def fetch_disclosures(page_size: int = 20) -> List[Dict]:
+def fetch_disclosures(page_size: int = 30) -> List[Dict]:
     """
-    Ambil daftar keterbukaan informasi terbaru dari IDX.
-    Returns list of dicts, atau list kosong jika gagal.
+    Fetch IDX disclosures with 3-endpoint fallback + retry logic.
+    Returns list of standardized dicts, or empty list on total failure.
     """
-    url = (
-        f"https://www.idx.co.id/primary/ListedCompany/GetAnnouncement"
-        f"?indexFrom=0&pageSize={page_size}&lang=id"
-    )
-
-    # Coba beberapa endpoint IDX (situs sering berubah path)
     endpoints = [
-        url,
-        f"https://www.idx.co.id/primary/ListedCompany/GetAnnouncement?indexFrom=0&pageSize={page_size}",
-        (
-            f"https://www.idx.co.id/umbraco/Surface/ListedCompany/GetAnnouncement"
-            f"?indexFrom=0&pageSize={page_size}&lang=id"
-        ),
+        f"https://www.idx.co.id/primary/ListedCompany/GetAnnouncement"
+        f"?indexFrom=0&pageSize={page_size}&lang=id",
+
+        f"https://www.idx.co.id/primary/ListedCompany/GetAnnouncement"
+        f"?indexFrom=0&pageSize={page_size}",
+
+        f"https://www.idx.co.id/umbraco/Surface/ListedCompany/GetAnnouncement"
+        f"?indexFrom=0&pageSize={page_size}&lang=id",
     ]
 
     for endpoint in endpoints:
-        try:
-            resp = requests.get(endpoint, impersonate="chrome120", timeout=15)
-            if resp.status_code == 200:
-                data = resp.json()
-                return _parse_announcements(data)
-            logger.warning("IDX endpoint %s → HTTP %s", endpoint, resp.status_code)
-            time.sleep(1)
-        except Exception as e:
-            logger.error("Error fetch disclosure dari %s: %s", endpoint, e)
-            time.sleep(1)
+        for attempt in range(3):  # 3 retries with exponential backoff
+            try:
+                resp = requests.get(
+                    endpoint,
+                    impersonate="chrome120",
+                    timeout=20,
+                    headers={
+                        **IDX_HEADERS,
+                        "Cache-Control": "no-cache",
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    items = _parse_announcements(data)
+                    if items:
+                        logger.info(
+                            "Fetched %d disclosures from %s (attempt %d)",
+                            len(items), endpoint[:60], attempt + 1,
+                        )
+                        return items
 
-    logger.error("Semua endpoint IDX gagal.")
+                logger.warning(
+                    "IDX endpoint HTTP %s: %s (attempt %d)",
+                    resp.status_code, endpoint[:60], attempt + 1,
+                )
+            except Exception as e:
+                logger.warning(
+                    "IDX fetch error: %s | %s (attempt %d)",
+                    endpoint[:60], e, attempt + 1,
+                )
+
+            # Exponential backoff: 2s, 4s, 8s
+            delay = 2 ** (attempt + 1)
+            time.sleep(delay)
+
+    logger.error("All IDX endpoints failed after retries.")
     return []
 
 
 def _parse_announcements(data) -> List[Dict]:
-    """Parse JSON response dari IDX ke list dict terstandar."""
+    """Parse JSON response from IDX into standardized list of dicts."""
     items = []
 
     rows = []
@@ -67,46 +85,76 @@ def _parse_announcements(data) -> List[Dict]:
 
     for row in rows:
         try:
-            # Format baru (Replies -> pengumuman)
-            if "pengumuman" in row:
-                p = row["pengumuman"]
-                item = {
-                    "id": str(p.get("Id2", p.get("Id", ""))),
-                    "emiten": p.get("Kode_Emiten", "").strip(),
-                    "title": p.get("JudulPengumuman", "").strip(),
-                    "date": p.get("TglPengumuman", ""),
-                    "category": p.get("JenisPengumuman", ""),
-                    "url": _build_attachment_url(row),
-                }
-            # Format lama (jika fallback ke struktur sebelumnya)
-            else:
-                item = {
-                    "id": str(row.get("Kode", row.get("code", row.get("No", "")))),
-                    "emiten": row.get("KodeEmiten", row.get("stock_code", row.get("Emiten", ""))),
-                    "title": row.get("Judul", row.get("title", row.get("Title", ""))),
-                    "date": row.get("Tanggal", row.get("date", row.get("Date", ""))),
-                    "category": row.get("Kategori", row.get("category", row.get("Category", ""))),
-                    "url": _build_attachment_url(row),
-                }
-
-            if item.get("title") or item.get("emiten"):
+            item = _parse_single_row(row)
+            if item and (item.get("title") or item.get("emiten")):
                 items.append(item)
         except Exception as e:
-            logger.debug("Gagal parse row: %s | %s", row, e)
+            logger.debug("Failed to parse row: %s | %s", row, e)
 
     return items
 
 
+def _parse_single_row(row: dict) -> Dict:
+    """Parse a single announcement row — handles both old and new IDX format."""
+    # New format (Replies -> pengumuman)
+    if "pengumuman" in row:
+        p = row["pengumuman"]
+        return {
+            "id": str(p.get("Id2", p.get("Id", ""))),
+            "emiten": (p.get("Kode_Emiten", "") or "").strip().upper(),
+            "title": (p.get("JudulPengumuman", "") or "").strip(),
+            "date": _format_date(p.get("TglPengumuman", "")),
+            "category": (p.get("JenisPengumuman", "") or "").strip(),
+            "url": _build_attachment_url(row),
+            "raw_date": p.get("TglPengumuman", ""),
+        }
+
+    # Old format (flat dict)
+    return {
+        "id": str(row.get("Kode", row.get("code", row.get("No", "")))),
+        "emiten": (
+            row.get("KodeEmiten", row.get("stock_code", row.get("Emiten", ""))) or ""
+        ).strip().upper(),
+        "title": (
+            row.get("Judul", row.get("title", row.get("Title", ""))) or ""
+        ).strip(),
+        "date": _format_date(
+            row.get("Tanggal", row.get("date", row.get("Date", "")))
+        ),
+        "category": (
+            row.get("Kategori", row.get("category", row.get("Category", ""))) or ""
+        ).strip(),
+        "url": _build_attachment_url(row),
+        "raw_date": row.get("Tanggal", row.get("date", row.get("Date", ""))),
+    }
+
+
+def _format_date(raw: str) -> str:
+    """Normalize date string to YYYY-MM-DD."""
+    if not raw:
+        return ""
+    # Already YYYY-MM-DD
+    if re.match(r"\d{4}-\d{2}-\d{2}", str(raw)):
+        return str(raw)[:10]
+    # Try common IDX date formats
+    for fmt in ["%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"]:
+        try:
+            return datetime.strptime(str(raw)[:10], fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return str(raw)[:10]
+
+
 def _build_attachment_url(row: dict) -> str:
-    """Bangun URL lampiran PDF/dokumen dari field attachment."""
-    # Struktur baru
+    """Build URL to the PDF/document attachment."""
+    # New structure
     attachments = row.get("attachments", [])
     if attachments and isinstance(attachments, list) and len(attachments) > 0:
         attach = attachments[0].get("FullSavePath", "")
         if attach:
             return attach
 
-    # Struktur lama
+    # Old structure
     attach = row.get("Attachment", row.get("attachment", row.get("File", "")))
     if attach and isinstance(attach, str) and attach.strip():
         if attach.startswith("http"):
@@ -115,22 +163,16 @@ def _build_attachment_url(row: dict) -> str:
     return ""
 
 
-def get_new_disclosures(disclosures: List[Dict]) -> List[Dict]:
+def filter_new_disclosures(disclosures: List[Dict], db) -> List[Dict]:
     """
-    Filter hanya disclosure yang belum pernah dilihat sebelumnya.
-    Update cache _seen_ids.
+    Filter only disclosures not yet seen — uses SQLite instead of in-memory set.
+    Also saves new ones to the database.
     """
-    global _seen_ids
-
-    # Reset cache kalau terlalu besar
-    if len(_seen_ids) > _MAX_CACHE:
-        _seen_ids.clear()
-
     new_items = []
-    for item in disclosures:
-        uid = item.get("id") or f"{item.get('emiten')}_{item.get('title')}"
-        if uid and uid not in _seen_ids:
-            _seen_ids.add(uid)
-            new_items.append(item)
+    for disc in disclosures:
+        if db.save_disclosure(disc):  # Returns True if new
+            new_items.append(disc)
 
+    if new_items:
+        logger.info("Found %d new disclosures out of %d total.", len(new_items), len(disclosures))
     return new_items

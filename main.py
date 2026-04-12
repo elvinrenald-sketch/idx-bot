@@ -20,8 +20,8 @@ from bot.handlers import (
     cmd_disclosure,
     cmd_signals,
     cmd_news,
-    cmd_anomaly,
     cmd_watchlist,
+    cmd_swing,
     cmd_status,
 )
 from bot.scheduler import register_jobs
@@ -112,6 +112,7 @@ def main() -> None:
         ("ihsg", cmd_ihsg),
         ("disclosure", cmd_disclosure),
         ("signals", cmd_signals),
+        ("swing", cmd_swing),
         ("news", cmd_news),
         ("anomaly", cmd_anomaly),
         ("watchlist", cmd_watchlist),

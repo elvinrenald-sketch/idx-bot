@@ -1,6 +1,6 @@
 """
 bot/handlers.py — Telegram command handlers for IDX Intelligence Bot v2.0
-Commands: /start, /help, /ihsg, /disclosure, /signals, /news, /anomaly, /swing, /watchlist, /status
+Commands: /start, /help, /ihsg, /disclosure, /signals, /news, /anomaly, /watchlist, /status
 """
 import logging
 import asyncio
@@ -26,14 +26,8 @@ from signals.formatter import (
     fmt_help,
     fmt_error,
     fmt_watchlist,
-    fmt_trade_setups,
 )
 from config import WATCHLIST_TICKERS
-
-# Professional Swing Modules
-from intelligence.fundamental import FundamentalFilter
-from intelligence.technical import TechnicalAnalyzer
-from intelligence.scoring import ScoringEngine
 
 logger = logging.getLogger("idx_bot.handlers")
 
@@ -215,62 +209,6 @@ async def cmd_anomaly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     except Exception as e:
         logger.error("Anomaly detection failed: %s", e)
         msg = fmt_error(f"Gagal deteksi anomali: {e}")
-
-    await _send_long(update, msg)
-
-
-async def cmd_swing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler /swing — Professional Trade Ideas."""
-    await update.message.reply_text("⏳ Menganalisa Trade Setup (Fundamental + Teknikal + Anomali)...")
-    logger.info("Processing /swing")
-
-    db = context.bot_data.get("db")
-    engine = context.bot_data.get("engine")
-    
-    # Needs db to scan anomalies first
-    if not db:
-        await _send_long(update, fmt_error("Sistem belum siap. Coba lagi nanti."))
-        return
-        
-    try:
-        from intelligence.anomaly import AnomalyDetector
-        detector = AnomalyDetector(db)
-        price_data = await asyncio.to_thread(fetch_stock_data, WATCHLIST_TICKERS)
-        anomalies = await asyncio.to_thread(detector.scan, price_data)
-        
-        if not anomalies:
-            await _send_long(update, "Zzz... Pasar sedang sepi. Tidak ada anomali untuk dianalisis.")
-            return
-            
-        # Instantiate Scoring Engine
-        fund = FundamentalFilter()
-        ta = TechnicalAnalyzer()
-        ai_gemini = engine.gemini if engine else None
-        scoring = ScoringEngine(ta, fund, ai_gemini)
-        
-        trade_setups = []
-        # Process each anomaly
-        for anomaly in anomalies:
-            ticker = anomaly.get("ticker", "")
-            current_price = anomaly.get("latest_price")
-            # Fallback if price missing via anomaly tracker
-            if not current_price and ticker in price_data:
-                current_price = price_data[ticker].get("close")
-                
-            setup = await asyncio.to_thread(scoring.evaluate_opportunity, ticker, current_price, anomaly)
-            if setup:
-                trade_setups.append(setup)
-                
-        if trade_setups:
-            # Sort by highest conviction
-            trade_setups.sort(key=lambda x: x["conviction_score"], reverse=True)
-            msg = fmt_trade_setups(trade_setups)
-        else:
-            msg = "🚫 <b>Tidak ada Trading Setup yang layak.</b>\nSemua anomali ditolak oleh filter Fundamental (Garbage) atau memiliki Risk/Reward ratio buruk."
-            
-    except Exception as e:
-        logger.error("Swing detection failed: %s", e)
-        msg = fmt_error(f"Gagal generate trade setup: {e}")
 
     await _send_long(update, msg)
 

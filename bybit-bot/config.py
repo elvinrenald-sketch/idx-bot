@@ -62,6 +62,9 @@ BTC_VOLUME_MAX_RATIO   = 1.0   # BTC volume must be stagnant/low
 DECOUPLING_THRESHOLD   = 0.3   # Max correlation with BTC (Pearson)
 DECOUPLING_WINDOW_H    = 24    # 24h correlation window
 
+# New Listing Filtering
+NEW_LISTING_DAYS       = 14    # M15 hanya discan untuk koin < 14 hari
+
 # Multi-Timeframe Sync
 TRIPLE_SCREEN_ENABLED  = True  # Align M15 with H1 & H4 trends
 

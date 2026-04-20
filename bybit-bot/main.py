@@ -23,7 +23,8 @@ from config import (
     TIMEFRAMES, PRIMARY_TIMEFRAME, SCAN_INTERVAL_SEC,
     POSITION_CHECK_SEC, MAX_OPEN_POSITIONS, DATA_DIR, WEB_PORT,
     BYBIT_TESTNET, ACCUM_MAX_RANGE_PCT, VOLUME_BREAKOUT_MULT, STOCH_ENTRY_MIN,
-    STOCH_ENTRY_MAX, SL_BUFFER_PCT, DEFAULT_RR_RATIO, TRIPLE_SCREEN_ENABLED
+    STOCH_ENTRY_MAX, SL_BUFFER_PCT, DEFAULT_RR_RATIO, TRIPLE_SCREEN_ENABLED,
+    NEW_LISTING_DAYS
 )
 import db
 from scanner import MarketScanner
@@ -255,6 +256,10 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
 
                             # ── Triple Screen Alignment ─────────────
                             if TRIPLE_SCREEN_ENABLED:
+                                # New Listing Timeframe Constraint
+                                if tf == '15m' and not coin.get('is_new_listing'):
+                                    continue # Skip M15 for regular coins
+
                                 if tf == '15m':
                                     h1_df = ohlcv_data.get('1h')
                                     h4_df = ohlcv_data.get('4h')
@@ -274,6 +279,7 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                                 signal['market_info'] = coin['market_info']
                                 signal['is_volume_alpha'] = coin.get('is_volume_alpha', False)
                                 signal['is_decoupled'] = coin.get('is_decoupled', False)
+                                signal['is_new_listing'] = coin.get('is_new_listing', False)
                                 signal['correlation'] = coin.get('correlation', 1.0)
                                 signal['vol_ratio'] = coin.get('vol_ratio', 1.0)
                                 

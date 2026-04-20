@@ -14,7 +14,8 @@ from config import (
     ALPHA_THRESHOLD_PCT, ALPHA_LOOKBACK_H, ALPHA_CANDIDATE_LIMIT,
     MAX_ALPHA_COINS, RATE_LIMIT_DELAY, MIN_VOLUME_24H, MIN_PRICE,
     MAX_SPREAD_PCT, BLACKLIST_SYMBOLS, VOLUME_ALPHA_THRESHOLD,
-    BTC_VOLUME_MAX_RATIO, DECOUPLING_THRESHOLD, DECOUPLING_WINDOW_H
+    BTC_VOLUME_MAX_RATIO, DECOUPLING_THRESHOLD, DECOUPLING_WINDOW_H,
+    NEW_LISTING_DAYS
 )
 
 log = logging.getLogger('scanner')
@@ -199,10 +200,14 @@ class MarketScanner:
             is_volume_alpha = (coin_vol_ratio >= VOLUME_ALPHA_THRESHOLD) and (btc_vol_ratio <= BTC_VOLUME_MAX_RATIO)
 
             # 4. Decoupling Detector (Pearson Correlation)
-            # Higher score = more correlated with BTC (Beta)
-            # Lower score = decoupling (Alpha)
             correlation = self._calculate_correlation(coin_df, btc_df)
             is_decoupled = correlation <= DECOUPLING_THRESHOLD
+            
+            # 5. New Listing Detection
+            # If 1h history is less than NEW_LISTING_DAYS, it's 'New'
+            # 24 candles per day * NEW_LISTING_DAYS
+            history_len = len(coin_df)
+            is_new_listing = history_len <= (NEW_LISTING_DAYS * 24)
 
             # Bid/Ask for spread check
             bid = float(ticker.get('bid', 0) or 0)
@@ -226,6 +231,7 @@ class MarketScanner:
                 'market_info': info,
                 'is_volume_alpha': is_volume_alpha,
                 'is_decoupled': is_decoupled,
+                'is_new_listing': is_new_listing,
                 'correlation': round(correlation, 3),
                 'vol_ratio': round(coin_vol_ratio, 2)
             })

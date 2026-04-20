@@ -171,6 +171,9 @@ class MarketScanner:
         for item in top_candidates:
             symbol = item['symbol']
             ticker = item['ticker']
+            info = self.get_market_info(symbol)
+            if not info:
+                continue
             
             # Deep Scan Logic
             coin_df = self.fetch_ohlcv(symbol, '1h', limit=DECOUPLING_WINDOW_H + 1)

@@ -224,19 +224,19 @@ class MarketScanner:
                 'symbol': symbol,
                 'bybit_symbol': info['id'],
                 'base': info['base'],
-                'price': price_now,
+                'price': float(price_now),
                 'volume_24h': float(ticker.get('quoteVolume', 0)),
                 'pct_change_24h': float(ticker.get('percentage', 0)),
-                'pct_change_4h': round(pct_change_4h, 2),
-                'btc_change_4h': round(btc_change_4h, 2),
-                'alpha': round(alpha_4h, 2),
-                'spread_pct': round(spread_pct, 4),
+                'pct_change_4h': float(round(pct_change_4h, 2)),
+                'btc_change_4h': float(round(btc_change_4h, 2)),
+                'alpha': float(round(alpha_4h, 2)),
+                'spread_pct': float(round(spread_pct, 4)),
                 'market_info': info,
-                'is_volume_alpha': is_volume_alpha,
-                'is_decoupled': is_decoupled,
-                'is_new_listing': is_new_listing,
-                'correlation': round(correlation, 3),
-                'vol_ratio': round(coin_vol_ratio, 2)
+                'is_volume_alpha': bool(is_volume_alpha),
+                'is_decoupled': bool(is_decoupled),
+                'is_new_listing': bool(is_new_listing),
+                'correlation': float(round(correlation, 3)),
+                'vol_ratio': float(round(coin_vol_ratio, 2))
             })
 
         # Final Sort by REAL-TIME alpha (4h)

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bybit Alpha Bot</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #0a0e17;
+            color: #e0e6ed;
+            min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1f2e 0%, #0d1117 100%);
+            border-bottom: 1px solid #21262d;
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 { font-size: 18px; color: #58a6ff; }
+        .header .status {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-scanning { background: #1f6feb33; color: #58a6ff; }
+        .status-idle { background: #23863633; color: #3fb950; }
+        .status-error { background: #da363433; color: #f85149; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+            padding: 20px;
+        }
+        .card {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 12px;
+            padding: 16px;
+        }
+        .card h3 {
+            font-size: 13px;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .metric {
+            font-size: 28px;
+            font-weight: 700;
+            color: #f0f6fc;
+        }
+        .metric.green { color: #3fb950; }
+        .metric.red { color: #f85149; }
+        .metric-sub {
+            font-size: 13px;
+            color: #8b949e;
+            margin-top: 4px;
+        }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #21262d22;
+            font-size: 14px;
+        }
+        .stat-row:last-child { border: none; }
+        .stat-label { color: #8b949e; }
+        .positions { grid-column: 1 / -1; }
+        .pos-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+            gap: 8px;
+            padding: 10px 0;
+            border-bottom: 1px solid #21262d44;
+            font-size: 13px;
+        }
+        .pos-header { color: #8b949e; font-weight: 600; font-size: 11px; text-transform: uppercase; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-long { background: #23863633; color: #3fb950; }
+        .badge-alpha { background: #1f6feb22; color: #58a6ff; }
+        .alpha-list {
+            max-height: 200px;
+            overflow-y: auto;
+            grid-column: 1 / -1;
+        }
+        .alpha-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 8px;
+            padding: 6px 0;
+            font-size: 12px;
+            border-bottom: 1px solid #21262d22;
+        }
+        .trades-list { grid-column: 1 / -1; }
+        .trade-row {
+            display: grid;
+            grid-template-columns: 0.5fr 1fr 1fr 1fr 1fr 1.5fr;
+            gap: 8px;
+            padding: 8px 0;
+            font-size: 12px;
+            border-bottom: 1px solid #21262d22;
+        }
+        .pnl-pos { color: #3fb950; }
+        .pnl-neg { color: #f85149; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .scanning { animation: pulse 1.5s ease-in-out infinite; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🤖 Bybit Alpha Bot</h1>
+        <div>
+            <span id="scan-count" style="margin-right: 12px; font-size: 13px; color: #8b949e;">Scan #0</span>
+            <span id="status" class="status status-idle">STARTING</span>
+        </div>
+    </div>
+    <div class="grid">
+        <div class="card">
+            <h3>💰 Equity</h3>
+            <div class="metric" id="equity">$0.00</div>
+            <div class="metric-sub" id="available">Available: $0.00</div>
+        </div>
+        <div class="card">
+            <h3>📊 Win Rate</h3>
+            <div class="metric" id="winrate">0%</div>
+            <div class="metric-sub" id="wl">W: 0 / L: 0</div>
+        </div>
+        <div class="card">
+            <h3>💵 Total PnL</h3>
+            <div class="metric" id="total-pnl">$0.00</div>
+            <div class="metric-sub" id="total-trades">0 trades</div>
+        </div>
+        <div class="card">
+            <h3>📡 Scanner</h3>
+            <div class="metric" id="signals">0 signals</div>
+            <div class="metric-sub" id="scan-info">Alpha: 0 coins</div>
+        </div>
+
+        <div class="card positions">
+            <h3>📋 Open Positions</h3>
+            <div class="pos-row pos-header">
+                <div>Symbol</div><div>Entry</div><div>Leverage</div><div>SL / TP</div><div>Status</div>
+            </div>
+            <div id="pos-list"><div style="color:#8b949e;padding:12px 0;font-size:13px">No open positions</div></div>
+        </div>
+
+        <div class="card alpha-list">
+            <h3>🔥 Top Alpha Coins (vs BTC)</h3>
+            <div class="alpha-row pos-header">
+                <div>Coin</div><div>Alpha</div><div>24h Change</div><div>Volume</div>
+            </div>
+            <div id="alpha-list"><div style="color:#8b949e;padding:8px 0;font-size:12px">Scanning...</div></div>
+        </div>
+
+        <div class="card trades-list">
+            <h3>📜 Recent Trades</h3>
+            <div class="trade-row pos-header">
+                <div>#</div><div>Symbol</div><div>Entry</div><div>Exit</div><div>PnL</div><div>Reason</div>
+            </div>
+            <div id="trades-list"><div style="color:#8b949e;padding:8px 0;font-size:12px">No trades yet</div></div>
+        </div>
+    </div>
+
+    <script>
+        async function refresh() {
+            try {
+                const r = await fetch('/api/state');
+                const d = await r.json();
+
+                document.getElementById('status').textContent = d.status;
+                document.getElementById('status').className = 'status status-' + (d.status === 'SCANNING' ? 'scanning' : d.status === 'ERROR' ? 'error' : 'idle');
+                document.getElementById('scan-count').textContent = `Scan #${d.scans} (${d.last_scan_ms}ms)`;
+                document.getElementById('equity').textContent = `$${(d.equity||0).toFixed(2)}`;
+                const bal = d.balance || {};
+                document.getElementById('available').innerHTML = 
+                    `<span title="Available for Trading">UTA: $${(bal.uta_available||0).toFixed(2)}</span> | ` +
+                    `<span title="Funds in Funding Wallet" style="color: #8b949e">FUND: $${(bal.fund_equity||0).toFixed(2)}</span>`;
+
+
+                const s = d.stats || {};
+                document.getElementById('winrate').textContent = `${(s.win_rate||0).toFixed(1)}%`;
+                document.getElementById('wl').textContent = `W: ${s.wins||0} / L: ${s.losses||0}`;
+
+                const pnl = s.total_pnl || 0;
+                const pnlEl = document.getElementById('total-pnl');
+                pnlEl.textContent = `$${pnl.toFixed(4)}`;
+                pnlEl.className = 'metric ' + (pnl >= 0 ? 'green' : 'red');
+
+                document.getElementById('total-trades').textContent = `${s.total_trades||0} trades`;
+                document.getElementById('signals').textContent = `${d.signals_found||0} signals`;
+                document.getElementById('scan-info').textContent = `Alpha: ${(d.alpha_coins||[]).length} coins`;
+
+                // Open positions
+                const posEl = document.getElementById('pos-list');
+                const ops = d.open_positions || [];
+                if (ops.length === 0) {
+                    posEl.innerHTML = '<div style="color:#8b949e;padding:12px 0;font-size:13px">No open positions</div>';
+                } else {
+                    posEl.innerHTML = ops.map(p => `
+                        <div class="pos-row">
+                            <div><span class="badge badge-long">LONG</span> ${p.bybit_symbol}</div>
+                            <div>${p.entry_price?.toFixed(6)||'-'}</div>
+                            <div>${p.leverage}x</div>
+                            <div>SL: ${p.sl_price?.toFixed(4)||'-'} / TP: ${p.tp_price?.toFixed(4)||'-'}</div>
+                            <div>${p.timeframe} | α${p.alpha_pct?.toFixed(1)||0}%</div>
+                        </div>
+                    `).join('');
+                }
+
+                // Alpha coins
+                const alphaEl = document.getElementById('alpha-list');
+                const ac = d.alpha_coins || [];
+                if (ac.length === 0) {
+                    alphaEl.innerHTML = '<div style="color:#8b949e;padding:8px 0;font-size:12px">No alpha coins detected</div>';
+                } else {
+                    alphaEl.innerHTML = ac.slice(0, 15).map(c => `
+                        <div class="alpha-row">
+                            <div><span class="badge badge-alpha">${c.base}</span></div>
+                            <div style="color:#3fb950">+${c.alpha?.toFixed(1)}%</div>
+                            <div>${c.pct_change_24h?.toFixed(1)}%</div>
+                            <div>$${(c.volume_24h/1e6)?.toFixed(1)}M</div>
+                        </div>
+                    `).join('');
+                }
+
+                // Recent trades
+                const tradesEl = document.getElementById('trades-list');
+                const tr = d.recent_trades || [];
+                if (tr.length === 0) {
+                    tradesEl.innerHTML = '<div style="color:#8b949e;padding:8px 0;font-size:12px">No trades yet</div>';
+                } else {
+                    tradesEl.innerHTML = tr.map(t => `
+                        <div class="trade-row">
+                            <div>#${t.id}</div>
+                            <div>${t.bybit_symbol}</div>
+                            <div>${t.entry_price?.toFixed(6)||'-'}</div>
+                            <div>${t.exit_price?.toFixed(6)||'-'}</div>
+                            <div class="${t.pnl>=0?'pnl-pos':'pnl-neg'}">$${t.pnl?.toFixed(4)||'0'} (${t.pnl_pct?.toFixed(1)||'0'}%)</div>
+                            <div>${t.close_reason||''}</div>
+                        </div>
+                    `).join('');
+                }
+
+            } catch(e) { console.error('Refresh error:', e); }
+        }
+        setInterval(refresh, 5000);
+        refresh();
+    </script>
+</body>
+</html>

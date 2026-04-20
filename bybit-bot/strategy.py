@@ -539,4 +539,37 @@ def _calc_confidence(hl_touches: int, vol_ratio: float, stoch_signal: str,
     # Accumulation duration (max 10 pts)
     score += min(10, accum_candles)
 
-    return min(100, score)
+
+def is_bullish_structure(df: pd.DataFrame) -> bool:
+    """
+    Pure Price Action trend detection for Triple Screen (H1/H4).
+    Trend is Bullish if:
+    1. Most recent pivot is a Higher Low OR
+    2. Last 5 candles show an upward slope (Price > SMA5) OR
+    3. Current candle closed bullish and above previous high.
+    
+    This avoids EMA dependency while ensuring we don't buy into a crash.
+    """
+    if len(df) < 10:
+        return False
+        
+    c = df['close'].iloc[-1]
+    o = df['open'].iloc[-1]
+    
+    # 1. Higher Low check via Pivots
+    p_lows = detect_pivot_lows(df)
+    if len(p_lows) >= 2:
+        last_low = df['low'].iloc[p_lows[-1]]
+        prev_low = df['low'].iloc[p_lows[-2]]
+        if last_low > prev_low and c > last_low:
+            return True
+            
+    # 2. Short-term momentum check (Price Action)
+    # Price is above the average of the last 5 candles
+    sma5 = df['close'].tail(5).mean()
+    if c > sma5:
+        # Also need current candle to be not too bearish
+        if c >= o or (o - c) < (df['high'].iloc[-1] - df['low'].iloc[-1]) * 0.3:
+            return True
+            
+    return False

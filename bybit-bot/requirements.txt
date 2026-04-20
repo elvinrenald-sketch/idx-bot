@@ -1,0 +1,8 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+jinja2==3.1.4
+aiohttp==3.10.0
+ccxt==4.4.50
+pybit==5.9.0
+pandas==2.2.3
+numpy==2.1.0

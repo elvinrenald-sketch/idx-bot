@@ -47,7 +47,7 @@ BREAKOUT_CLOSE_ABOVE = True  # Candle harus CLOSE di atas resistance
 
 # Stochastic Filter
 STOCH_ENTRY_MIN     = 20     # Sweet spot mulai dari 20
-STOCH_ENTRY_MAX     = 38     # Batas maksimal entry di 38 (sweet spot 20-38)
+STOCH_ENTRY_MAX     = 42     # Batas maksimal entry di 42 (sweet spot 20-42)
 
 # ══════════════════════════════════════════════════════════════
 # ALPHA DETECTION (KALIMASADA-style)

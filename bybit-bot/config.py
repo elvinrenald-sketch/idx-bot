@@ -31,12 +31,12 @@ STOCH_D        = 3
 
 # Pivot detection
 PIVOT_LEFT     = 5     # Candle ke kiri untuk mendeteksi pivot
-PIVOT_RIGHT    = 5     # [FIX#1] Naikkan ke 5 agar pivot tidak palsu (butuh 5 candle konfirmasi)
+PIVOT_RIGHT    = 3     # [Tuned] Turunkan ke 3 agar entry lebih cepat tanpa mengorbankan akurasi
 
 # Higher Low
 MIN_HL_TOUCHES    = 2   # Minimal 2 higher low touches pada trendline
 MAX_HL_TOUCHES    = 5   # Maksimal 5 touches
-MIN_HL_CANDLE_GAP = 5   # [FIX#3] Jarak minimal antar HL (candle): mencegah HL palsu berdekatan
+MIN_HL_CANDLE_GAP = 3   # [Tuned] Jarak minimal antar HL agar bisa menangkap tren agresif
 
 # Accumulation Zone
 ACCUM_MIN_CANDLES   = 6      # Minimal 6 candle dalam zona akumulasi
@@ -48,7 +48,7 @@ BREAKOUT_CLOSE_ABOVE = True  # Candle harus CLOSE di atas resistance
 
 # Stochastic Filter
 STOCH_ENTRY_MIN     = 20     # Sweet spot mulai dari 20
-STOCH_ENTRY_MAX     = 45     # [FIX#7] Diturunkan dari 60→45: hanya entry di zona pullback sejati
+STOCH_ENTRY_MAX     = 50     # [Tuned] Naikkan sedikit ke 50 agar tidak ketinggalan kereta tren H1
 
 # Trendline / Pullback Entry
 TRENDLINE_TOLERANCE_PCT = 2.0  # Harga harus dalam 2% dari trendline HL untuk entry

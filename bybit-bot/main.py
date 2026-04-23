@@ -24,11 +24,11 @@ from config import (
     POSITION_CHECK_SEC, MAX_OPEN_POSITIONS, DATA_DIR, WEB_PORT,
     BYBIT_TESTNET, ACCUM_MAX_RANGE_PCT, VOLUME_BREAKOUT_MULT, STOCH_ENTRY_MIN,
     STOCH_ENTRY_MAX, SL_BUFFER_PCT, DEFAULT_RR_RATIO, TRIPLE_SCREEN_ENABLED,
-    NEW_LISTING_DAYS
+    NEW_LISTING_DAYS, MIN_H4_CANDLES_FOR_STRUCTURE, MIN_D1_CANDLES_FOR_STRUCTURE
 )
 import db
 from scanner import MarketScanner
-from strategy import analyze, is_bullish_structure
+from strategy import analyze, is_bullish_structure, is_volume_confirmed, is_pucuk, is_real_structure
 from risk_manager import calculate_leverage, calculate_position_size, calculate_trailing_sl
 from executor import BybitExecutor
 
@@ -140,8 +140,10 @@ async def tg_signal(session: aiohttp.ClientSession, signal: Dict, sizing: Dict,
                     order_result: Dict):
     """Send entry notification to Telegram."""
     entry = order_result.get('fill_price', signal['entry_price'])
+    entry_type = signal.get('signal_type', 'LONG')
+    entry_emoji = '📐' if 'TRENDLINE' in entry_type else '🏠'
     text = (
-        f"🎯 <b>LONG ENTRY</b>\n"
+        f"🎯 <b>{entry_emoji} {entry_type}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 <b>{signal['symbol']}</b> ({signal['timeframe']})\n"
         f"💰 Entry: <code>{entry:.6f}</code>\n"
@@ -254,21 +256,58 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                             if df is None:
                                 continue
 
-                            # ── Triple Screen Alignment ─────────────
+                            # ── Triple Screen + Pucuk Protector + Structure Validator ──
                             if TRIPLE_SCREEN_ENABLED:
-                                # New Listing Timeframe Constraint
-                                if tf == '15m' and not coin.get('is_new_listing'):
-                                    continue # Skip M15 for regular coins
+                                h4_df = ohlcv_data.get('4h')
+                                d1_df = ohlcv_data.get('1d')
 
                                 if tf == '15m':
                                     h1_df = ohlcv_data.get('1h')
-                                    h4_df = ohlcv_data.get('4h')
+                                    # Structure alignment
                                     if not (is_bullish_structure(h1_df) and is_bullish_structure(h4_df)):
-                                        continue # REJECT: H1 or H4 not aligned
+                                        continue
+                                    # Volume confirmation on higher TF
+                                    if not (is_volume_confirmed(h1_df) or is_volume_confirmed(h4_df)):
+                                        continue
+                                    # PUCUK PROTECTOR: H4 or D1 kepanasan → TOLAK
+                                    if is_pucuk(h4_df) or is_pucuk(d1_df):
+                                        log.info(f"🚫 PUCUK REJECT {coin['base']} M15: H4/D1 overheated")
+                                        continue
+                                    # [FIX #5] CANDLE STRUCTURE VALIDATOR: Pola HL di M15 harus
+                                    # span minimal 4 candle H1 (bukan 1-3 candle besar saja)
+                                    pre_signal = analyze(df, coin['symbol'], tf)
+                                    if pre_signal and pre_signal.get('higher_lows'):
+                                        hl_idx = [i for i, p in enumerate(df['close'])
+                                                  if df['low'].iloc[i] in pre_signal['higher_lows']]
+                                        if not is_real_structure(df, h1_df, hl_idx,
+                                                                 min_higher_candles=MIN_H4_CANDLES_FOR_STRUCTURE):
+                                            log.info(f"🚫 FAKE STRUCTURE REJECT {coin['base']} M15: HL terlalu kecil di H1")
+                                            continue
+
                                 elif tf == '1h':
-                                    h4_df = ohlcv_data.get('4h')
+                                    # Structure alignment
                                     if not is_bullish_structure(h4_df):
-                                        continue # REJECT: H4 not aligned
+                                        continue
+                                    # PUCUK PROTECTOR: H4 or D1 kepanasan → TOLAK
+                                    if is_pucuk(h4_df) or is_pucuk(d1_df):
+                                        log.info(f"🚫 PUCUK REJECT {coin['base']} H1: H4/D1 overheated")
+                                        continue
+                                    # [FIX #5] CANDLE STRUCTURE VALIDATOR: Pola HL di H1 harus
+                                    # span minimal 2 candle H4 (bukan 1 candle H4 besar saja)
+                                    pre_signal = analyze(df, coin['symbol'], tf)
+                                    if pre_signal and pre_signal.get('higher_lows'):
+                                        hl_idx = [i for i, p in enumerate(df['close'])
+                                                  if df['low'].iloc[i] in pre_signal['higher_lows']]
+                                        if not is_real_structure(df, h4_df, hl_idx,
+                                                                 min_higher_candles=MIN_D1_CANDLES_FOR_STRUCTURE):
+                                            log.info(f"🚫 FAKE STRUCTURE REJECT {coin['base']} H1: HL terlalu kecil di H4")
+                                            continue
+
+                                elif tf == '4h':
+                                    # PUCUK PROTECTOR: D1 kepanasan → TOLAK
+                                    if is_pucuk(d1_df):
+                                        log.info(f"🚫 PUCUK REJECT {coin['base']} H4: D1 overheated")
+                                        continue
 
                             signal = analyze(df, coin['symbol'], tf)
                             if signal:
@@ -285,6 +324,7 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                                 
                                 signals.append(signal)
                                 break  # One signal per coin is enough
+
 
                         if len(signals) >= slots:
                             break  # Enough signals

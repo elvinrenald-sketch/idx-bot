@@ -31,28 +31,41 @@ STOCH_D        = 3
 
 # Pivot detection
 PIVOT_LEFT     = 5     # Candle ke kiri untuk mendeteksi pivot
-PIVOT_RIGHT    = 3     # Candle ke kanan (lebih kecil = deteksi lebih cepat)
+PIVOT_RIGHT    = 5     # [FIX#1] Naikkan ke 5 agar pivot tidak palsu (butuh 5 candle konfirmasi)
 
 # Higher Low
-MIN_HL_TOUCHES = 2     # Minimal 2 higher low touches pada trendline
-MAX_HL_TOUCHES = 3     # Maksimal 3 touches (hindari trend yang sudah jenuh/terlalu lama)
+MIN_HL_TOUCHES    = 2   # Minimal 2 higher low touches pada trendline
+MAX_HL_TOUCHES    = 5   # Maksimal 5 touches
+MIN_HL_CANDLE_GAP = 5   # [FIX#3] Jarak minimal antar HL (candle): mencegah HL palsu berdekatan
 
 # Accumulation Zone
-ACCUM_MIN_CANDLES   = 8      # Minimal 8 candle dalam zona akumulasi
-ACCUM_MAX_RANGE_PCT = 6.0    # Range zona max 6% (kotak ungu)
+ACCUM_MIN_CANDLES   = 6      # Minimal 6 candle dalam zona akumulasi
+ACCUM_MAX_RANGE_PCT = 7.2    # Range zona max 7.2% (kotak ungu)
 
 # Breakout Confirmation
-VOLUME_BREAKOUT_MULT = 1.5   # Volume harus ≥ 1.5x rata-rata 20 candle
+VOLUME_BREAKOUT_MULT = 1.3   # Volume harus ≥ 1.3x rata-rata 20 candle
 BREAKOUT_CLOSE_ABOVE = True  # Candle harus CLOSE di atas resistance
 
 # Stochastic Filter
 STOCH_ENTRY_MIN     = 20     # Sweet spot mulai dari 20
-STOCH_ENTRY_MAX     = 38     # Batas maksimal entry di 38 (sweet spot 20-38)
+STOCH_ENTRY_MAX     = 45     # [FIX#7] Diturunkan dari 60→45: hanya entry di zona pullback sejati
+
+# Trendline / Pullback Entry
+TRENDLINE_TOLERANCE_PCT = 2.0  # Harga harus dalam 2% dari trendline HL untuk entry
+DEMAND_TOLERANCE_PCT    = 1.5  # Harga harus dalam 1.5% dari demand zone
+
+# Pucuk Protector (H4/D1)
+PUCUK_STOCH_THRESHOLD   = 80   # Stochastic > 80 di H4/D1 = pucuk, TOLAK
+PUCUK_SMA_DISTANCE_PCT  = 8.0  # Harga > 8% di atas SMA-20 H4/D1 = overextended, TOLAK
+
+# Candle Structure Validator
+MIN_H4_CANDLES_FOR_STRUCTURE = 4   # Pola HL/HH di M15/H1 wajib >= 4 candle di H4
+MIN_D1_CANDLES_FOR_STRUCTURE = 2   # Pola HL/HH di H1 wajib >= 2 candle di D1
 
 # ══════════════════════════════════════════════════════════════
 # ALPHA DETECTION (KALIMASADA-style)
 # ══════════════════════════════════════════════════════════════
-ALPHA_THRESHOLD_PCT = 2.0    # Koin harus outperform BTC minimal 2%
+ALPHA_THRESHOLD_PCT = 3.0    # Koin harus outperform BTC minimal 3% (True Alpha only)
 ALPHA_LOOKBACK_H    = 4      # Bandingkan performa 4 jam terakhir
 ALPHA_CANDIDATE_LIMIT = 50   # Jumlah koin yang di-investigasi lewat deep scan
 

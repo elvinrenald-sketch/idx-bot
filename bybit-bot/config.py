@@ -94,6 +94,16 @@ TRAILING_BREAKEVEN = True    # Geser SL ke breakeven setelah profit >= 1R
 # SL Buffer
 SL_BUFFER_PCT      = 0.3     # Tambahan 0.3% di bawah support zone untuk SL
 
+# ATR Multiplier per Timeframe
+# RR tetap 1:2 di semua TF, hanya ukuran absolut SL/TP yang menyesuaikan "napas" TF
+ATR_SL_MULT = {
+    '15m': 1.5,   # M15: napas pendek, SL tipis tapi wajar
+    '1h':  2.0,   # H1:  napas lebih panjang, SL lebih lebar
+    '4h':  2.5,   # H4:  swing trade, butuh ruang gerak lebih besar
+    '1d':  3.0,   # D1:  position trade, SL sangat lebar
+}
+ATR_SL_MULT_DEFAULT = 1.5  # Fallback jika TF tidak dikenali
+
 # ══════════════════════════════════════════════════════════════
 # MARKET FILTERS
 # ══════════════════════════════════════════════════════════════

@@ -16,6 +16,7 @@ from config import (
     TRENDLINE_TOLERANCE_PCT, DEMAND_TOLERANCE_PCT,
     PUCUK_STOCH_THRESHOLD, PUCUK_SMA_DISTANCE_PCT,
     MIN_H4_CANDLES_FOR_STRUCTURE, MIN_D1_CANDLES_FOR_STRUCTURE,
+    ATR_SL_MULT, ATR_SL_MULT_DEFAULT,
 )
 
 log = logging.getLogger('strategy')
@@ -463,25 +464,27 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         entry_price = current_price
         current_atr = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else entry_price * 0.02
 
-        # [FIX #2] SL selalu berbasis ATR (minimum 1.5x ATR), BUKAN trendline tipis 0.3%
-        # Ini mencegah SL kena noise normal crypto di H1
-        atr_sl_distance = current_atr * 1.5
+        # [FIX #2 + TF-aware] SL berbasis ATR dengan multiplier sesuai timeframe
+        # M15=1.5x, H1=2.0x, H4=2.5x — RR tetap 1:2 semua TF
+        atr_mult = ATR_SL_MULT.get(timeframe, ATR_SL_MULT_DEFAULT)
+        atr_sl_distance = current_atr * atr_mult
 
         if near_trendline and trendline_price:
-            # SL harus di bawah trendline ATAU 1.5x ATR, pilih yang LEBIH JAUH (lebih aman)
+            # SL di bawah trendline atau 1.5x ATR, pilih yang LEBIH JAUH
             trendline_sl = trendline_price * (1 - SL_BUFFER_PCT / 100)
             sl_price = min(trendline_sl, entry_price - atr_sl_distance)
         elif nearest_demand:
-            # SL di bawah demand zone, min 1.5x ATR
+            # SL di bawah demand zone, min sesuai ATR TF
             demand_sl = nearest_demand['low'] * (1 - SL_BUFFER_PCT / 100)
             sl_price = min(demand_sl, entry_price - atr_sl_distance)
         else:
             sl_price = entry_price - atr_sl_distance  # Fallback ATR
 
-        # Pastikan SL selalu minimal 1.5% di bawah entry (tidak lebih tipis dari ini)
-        min_sl_distance = entry_price * 0.015
-        if (entry_price - sl_price) < min_sl_distance:
-            sl_price = entry_price - min_sl_distance
+        # Minimum SL floor: M15=1.5%, H1=2.0%, H4=2.5%
+        min_sl_pct = atr_mult / 100.0  # proporsional dengan multiplier
+        min_sl_floor = entry_price * min_sl_pct
+        if (entry_price - sl_price) < min_sl_floor:
+            sl_price = entry_price - min_sl_floor
 
         # TP: Risk:Reward ratio
         sl_distance = entry_price - sl_price

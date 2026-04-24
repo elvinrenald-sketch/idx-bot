@@ -28,7 +28,7 @@ from config import (
 )
 import db
 from scanner import MarketScanner
-from strategy import analyze, is_bullish_structure, is_volume_confirmed, is_pucuk, is_real_structure
+from strategy import analyze, is_pucuk, is_pump_candle, calc_atr
 from risk_manager import calculate_leverage, calculate_position_size, calculate_trailing_sl
 from executor import BybitExecutor
 
@@ -256,62 +256,36 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                             if df is None:
                                 continue
 
-                            # ── Triple Screen + Pucuk Protector + Structure Validator ──
-                            if TRIPLE_SCREEN_ENABLED:
-                                h4_df = ohlcv_data.get('4h')
-                                d1_df = ohlcv_data.get('1d')
+                        # ── KALIMASADA v7 PURE PRICE ACTION ──
+                        # Strategy sekarang handle semuanya:
+                        # Flat Resistance + Ascending HL + Demand 3x + Pump Guard
+                        # Main cukup pre-filter pucuk di H4/D1 untuk efisiensi
+                        for tf in TIMEFRAMES:
+                            df = ohlcv_data.get(tf)
+                            if df is None or len(df) < 60:
+                                continue
 
-                                if tf == '15m':
-                                    h1_df = ohlcv_data.get('1h')
-                                    # Structure alignment
-                                    if not (is_bullish_structure(h1_df) and is_bullish_structure(h4_df)):
-                                        continue
-                                    # Volume confirmation on higher TF
-                                    if not (is_volume_confirmed(h1_df) or is_volume_confirmed(h4_df)):
-                                        continue
-                                    # PUCUK PROTECTOR: H4 or D1 kepanasan → TOLAK
-                                    if is_pucuk(h4_df) or is_pucuk(d1_df):
-                                        log.info(f"🚫 PUCUK REJECT {coin['base']} M15: H4/D1 overheated")
-                                        continue
-                                    # [FIX #5] CANDLE STRUCTURE VALIDATOR: Pola HL di M15 harus
-                                    # span minimal 4 candle H1 (bukan 1-3 candle besar saja)
-                                    pre_signal = analyze(df, coin['symbol'], tf)
-                                    if pre_signal and pre_signal.get('higher_lows'):
-                                        hl_idx = [i for i, p in enumerate(df['close'])
-                                                  if df['low'].iloc[i] in pre_signal['higher_lows']]
-                                        if not is_real_structure(df, h1_df, hl_idx,
-                                                                 min_higher_candles=MIN_H4_CANDLES_FOR_STRUCTURE):
-                                            log.info(f"🚫 FAKE STRUCTURE REJECT {coin['base']} M15: HL terlalu kecil di H1")
-                                            continue
+                            # Skip M15 kecuali new listing
+                            if tf == '15m' and not coin.get('is_new_listing', False):
+                                continue
 
-                                elif tf == '1h':
-                                    # Structure alignment
-                                    if not is_bullish_structure(h4_df):
-                                        continue
-                                    # PUCUK PROTECTOR: H4 or D1 kepanasan → TOLAK
-                                    if is_pucuk(h4_df) or is_pucuk(d1_df):
-                                        log.info(f"🚫 PUCUK REJECT {coin['base']} H1: H4/D1 overheated")
-                                        continue
-                                    # [FIX #5] CANDLE STRUCTURE VALIDATOR: Pola HL di H1 harus
-                                    # span minimal 2 candle H4 (bukan 1 candle H4 besar saja)
-                                    pre_signal = analyze(df, coin['symbol'], tf)
-                                    if pre_signal and pre_signal.get('higher_lows'):
-                                        hl_idx = [i for i, p in enumerate(df['close'])
-                                                  if df['low'].iloc[i] in pre_signal['higher_lows']]
-                                        if not is_real_structure(df, h4_df, hl_idx,
-                                                                 min_higher_candles=MIN_D1_CANDLES_FOR_STRUCTURE):
-                                            log.info(f"🚫 FAKE STRUCTURE REJECT {coin['base']} H1: HL terlalu kecil di H4")
-                                            continue
+                            # Pre-filter PUCUK cepat di D1/H4 sebelum analyze()
+                            d1_df = ohlcv_data.get('1d')
+                            h4_df = ohlcv_data.get('4h')
 
-                                elif tf == '4h':
-                                    # PUCUK PROTECTOR: D1 kepanasan → TOLAK
-                                    if is_pucuk(d1_df):
-                                        log.info(f"🚫 PUCUK REJECT {coin['base']} H4: D1 overheated")
-                                        continue
+                            if d1_df is not None and len(d1_df) > 20:
+                                if is_pucuk(d1_df):
+                                    log.info(f"🚫 PUCUK D1 REJECT {coin['base']} {tf}")
+                                    continue
 
+                            if h4_df is not None and len(h4_df) > 20 and tf in ('15m', '1h'):
+                                if is_pucuk(h4_df):
+                                    log.info(f"🚫 PUCUK H4 REJECT {coin['base']} {tf}")
+                                    continue
+
+                            # PURE PRICE ACTION — analyze() handles everything
                             signal = analyze(df, coin['symbol'], tf)
                             if signal:
-                                # Inject Alpha metadata
                                 signal['alpha'] = coin['alpha']
                                 signal['bybit_symbol'] = coin['bybit_symbol']
                                 signal['volume_24h'] = coin['volume_24h']
@@ -321,10 +295,9 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                                 signal['is_new_listing'] = coin.get('is_new_listing', False)
                                 signal['correlation'] = coin.get('correlation', 1.0)
                                 signal['vol_ratio'] = coin.get('vol_ratio', 1.0)
-                                
-                                signals.append(signal)
-                                break  # One signal per coin is enough
 
+                                signals.append(signal)
+                                break  # 1 signal per koin cukup
 
                         if len(signals) >= slots:
                             break  # Enough signals

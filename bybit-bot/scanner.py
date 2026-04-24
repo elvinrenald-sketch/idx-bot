@@ -303,10 +303,12 @@ class MarketScanner:
             return 1.0
 
     def fetch_multi_timeframe(self, symbol: str) -> Dict[str, Optional[pd.DataFrame]]:
-        """Fetch OHLCV for all configured timeframes."""
+        """Fetch OHLCV for all configured timeframes + Daily for Pucuk Protector."""
         result = {}
         for tf in TIMEFRAMES:
             result[tf] = self.fetch_ohlcv(symbol, tf)
+        # Always fetch Daily for Pucuk Protector & Structure Validator
+        result['1d'] = self.fetch_ohlcv(symbol, '1d', limit=50)
         return result
 
     def close(self):

@@ -51,12 +51,17 @@ STOCH_ENTRY_MIN     = 20     # Sweet spot mulai dari 20
 STOCH_ENTRY_MAX     = 50     # [Tuned] Naikkan sedikit ke 50 agar tidak ketinggalan kereta tren H1
 
 # Trendline / Pullback Entry
-TRENDLINE_TOLERANCE_PCT = 2.0  # Harga harus dalam 2% dari trendline HL untuk entry
+TRENDLINE_TOLERANCE_PCT = 1.2  # [FIX] Harga harus dalam 1.2% dari trendline HL (ketat)
 DEMAND_TOLERANCE_PCT    = 1.5  # Harga harus dalam 1.5% dari demand zone
 
-# Pucuk Protector (H4/D1)
-PUCUK_STOCH_THRESHOLD   = 80   # Stochastic > 80 di H4/D1 = pucuk, TOLAK
-PUCUK_SMA_DISTANCE_PCT  = 8.0  # Harga > 8% di atas SMA-20 H4/D1 = overextended, TOLAK
+# Pucuk Protector (H4/D1) — [FIX v3] Lebih ketat
+PUCUK_STOCH_THRESHOLD   = 75   # [FIX] Turunkan dari 80 ke 75 agar menangkap pump lebih awal
+PUCUK_SMA_DISTANCE_PCT  = 4.0  # [FIX] Turunkan dari 8% ke 4% — ZEC pump 7% TIDAK tertangkap di 8%
+
+# Pump Candle Detector (BARU)
+PUMP_CANDLE_BODY_MULT   = 2.5  # Jika body candle > 2.5x ATR-14 = pump candle, TOLAK
+PUMP_RISE_PCT           = 5.0  # Jika harga naik > 5% dalam 5 candle = momentum exhaustion, TOLAK
+PUMP_LOOKBACK           = 5    # Cek 5 candle terakhir untuk deteksi pump
 
 # Candle Structure Validator
 MIN_H4_CANDLES_FOR_STRUCTURE = 4   # Pola HL/HH di M15/H1 wajib >= 4 candle di H4

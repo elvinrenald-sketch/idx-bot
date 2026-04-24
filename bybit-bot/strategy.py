@@ -17,6 +17,7 @@ from config import (
     PUCUK_STOCH_THRESHOLD, PUCUK_SMA_DISTANCE_PCT,
     MIN_H4_CANDLES_FOR_STRUCTURE, MIN_D1_CANDLES_FOR_STRUCTURE,
     ATR_SL_MULT, ATR_SL_MULT_DEFAULT,
+    PUMP_CANDLE_BODY_MULT, PUMP_RISE_PCT, PUMP_LOOKBACK,
 )
 
 log = logging.getLogger('strategy')
@@ -381,129 +382,185 @@ def check_stochastic(stoch_k: pd.Series, stoch_d: pd.Series) -> Tuple[bool, Dict
 
 def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
     """
-    Kalimasada Pullback Strategy — Entry at Trendline HL / Demand Zone.
+    Kalimasada v6 — PURE PRICE ACTION
 
-    Pipeline:
-    1. Calculate indicators (Stochastic, Volume SMA, ATR)
-    2. Detect pivot lows/highs
-    3. Detect demand zones
-    4. Detect higher lows (trendline)
-    5. Check: is price NEAR the HL trendline or demand zone? (Pullback entry)
-    6. Check: is volume rising? (Accumulation signal)
-    7. Check: Stochastic crossing up from low area (< 60)
-    8. Calculate SL/TP
+    FOKUS HANYA PADA PRICE ACTION:
+    1. Ascending trendline NAIK (Higher Lows, slope positif)
+    2. Entry A: Di HL ke-2+ saat pullback menyentuh trendline
+    3. Entry B: Di demand zone saat retest ke-3+
+    4. TOLAK koin yang sudah pump tinggi
+    5. Harga HARUS sedang pullback (turun ke support)
 
-    NEVER enters at breakout/pucuk. Only at support/trendline pullback.
+    TIDAK ADA: volume check, stochastic check, consolidation check
+    Karena price action adalah RAJA.
     """
     if df is None or len(df) < 50:
         return None
 
     try:
-        # ── Step 1: Indicators ──────────────────────────────
-        stoch_k, stoch_d = calc_stochastic(df, STOCH_K, STOCH_SMOOTH_K, STOCH_D)
-        vol_sma = calc_volume_sma(df, 20)
         atr = calc_atr(df, 14)
+        current_price = df['close'].iloc[-1]
 
-        # ── Step 2: Pivots ──────────────────────────────────
+        # -- Step 1: Pivots --
         p_lows = detect_pivot_lows(df)
         p_highs = detect_pivot_highs(df)
 
         if len(p_lows) < 2:
-            return None  # Not enough structure
+            return None
 
-        # ── Step 3: Demand Zones ────────────────────────────
-        demand_zones = detect_demand_zones(df)
-
-        # ── Step 4: Higher Lows ─────────────────────────────
+        # -- Step 2: Higher Lows (ascending trendline NAIK) --
         has_hl, hl_indices = detect_higher_lows(df, p_lows)
-        if not has_hl:
-            return None  # No higher low structure
+        if not has_hl or len(hl_indices) < 2:
+            return None  # Butuh minimal 2 HL
 
-        # ── Step 5: Trendline / Demand Pullback Check ───────
-        # Calculate trendline from higher lows
-        trendline_price = _calc_trendline_value(df, hl_indices)
-        current_price = df['close'].iloc[-1]
+        # -- Step 3: ASCENDING SLOPE --
+        first_hl_idx = hl_indices[0]
+        last_hl_idx = hl_indices[-1]
+        first_hl_price = df['low'].iloc[first_hl_idx]
+        last_hl_price = df['low'].iloc[last_hl_idx]
 
-        # Check if price is near the HL trendline
-        near_trendline = False
-        if trendline_price and trendline_price > 0:
-            distance_pct = ((current_price - trendline_price) / trendline_price) * 100
-            # Price must be within tolerance ABOVE trendline (not below = broken)
-            near_trendline = (-0.5 <= distance_pct <= TRENDLINE_TOLERANCE_PCT)
+        if last_hl_price <= first_hl_price:
+            return None  # Trendline TIDAK naik
 
-        # Check if price is near a demand zone
-        near_demand = False
+        candle_span = last_hl_idx - first_hl_idx
+        if candle_span <= 0:
+            return None
+        slope_per_candle = (last_hl_price - first_hl_price) / candle_span
+
+        # -- Step 3b: FLAT RESISTANCE (Atap Datar) --
+        # True Ascending Triangle HARUS punya Pivot High yang cluster di level yang sama
+        # Ini membedakan Ascending Triangle sejati dengan random uptrend biasa
+        FLAT_RESISTANCE_TOLERANCE = 3.0  # max 3% perbedaan antar Pivot High
+        flat_resistance_valid = False
+        flat_resistance_level = None
+
+        if len(p_highs) >= 2:
+            # Ambil pivot high yang relevan: hanya yang berada dalam rentang HL pertama hingga sekarang
+            relevant_highs = [i for i in p_highs if i >= first_hl_idx]
+            if len(relevant_highs) >= 2:
+                # Ambil harga-harga pivot high terbaru
+                ph_prices = [df['high'].iloc[i] for i in relevant_highs[-5:]]
+                ph_max = max(ph_prices)
+                ph_min = min(ph_prices)
+                # Cek apakah semua Pivot High berkumpul dalam toleransi 3%
+                spread_pct = ((ph_max - ph_min) / ph_max) * 100
+                if spread_pct <= FLAT_RESISTANCE_TOLERANCE and len(ph_prices) >= 2:
+                    flat_resistance_valid = True
+                    flat_resistance_level = (ph_max + ph_min) / 2
+
+        if not flat_resistance_valid:
+            return None  # Bukan Ascending Triangle sejati
+
+        # Cek: harga sekarang HARUS di bawah resistance (belum breakout)
+        if current_price >= flat_resistance_level * 0.98:
+            return None  # Harga sudah di resistance atau sudah breakout = pucuk
+
+        # Cek: jarak HL ke Resistance semakin menyempit (kompresi aktif)
+        gap_first_to_resistance = ((flat_resistance_level - first_hl_price) / flat_resistance_level) * 100
+        gap_last_to_resistance = ((flat_resistance_level - last_hl_price) / flat_resistance_level) * 100
+        if gap_last_to_resistance >= gap_first_to_resistance:
+            return None  # Triangle tidak menyempit = bukan kompresi
+
+
+        # -- Step 4: Demand Zone + Retest Count --
+        demand_zones = detect_demand_zones(df, lookback=200)
         nearest_demand = None
+        demand_retest_count = 0
+
         if demand_zones:
             valid_demands = [dz for dz in demand_zones
-                            if dz['high'] <= current_price * 1.02]
+                            if dz['high'] <= current_price * 1.05]
             if valid_demands:
                 nearest_demand = max(valid_demands, key=lambda x: x['high'])
-                dz_distance = ((current_price - nearest_demand['mid']) / nearest_demand['mid']) * 100
-                near_demand = (0 <= dz_distance <= DEMAND_TOLERANCE_PCT)
 
-        if not near_trendline and not near_demand:
-            return None  # Price not at trendline or demand → skip
+                dz_idx = nearest_demand['index']
+                dz_high = nearest_demand['high']
 
-        # ── Step 6: Volume Rising Check ─────────────────────
-        # Volume in last 5 candles should be higher than prior 5
-        if not _is_volume_rising(df):
-            return None  # Volume dead, no accumulation
+                for k in range(dz_idx + 3, len(df)):
+                    candle_low = df['low'].iloc[k]
+                    candle_close = df['close'].iloc[k]
+                    if candle_low <= dz_high * 1.01 and candle_close > dz_high * 0.99:
+                        demand_retest_count += 1
 
-        # ── Step 7: Stochastic Confirmation ─────────────────
-        stoch_ok, stoch_info = check_stochastic(stoch_k, stoch_d)
-        if not stoch_ok:
-            return None  # Stochastic doesn't confirm
+        # -- Step 5: Trendline value --
+        trendline_price = _calc_trendline_value(df, hl_indices)
 
-        # ── Step 8: Consolidation Check ─────────────────────
-        # Recent candles should be small (consolidating), not big pump candles
-        if not _is_consolidating(df, atr):
-            return None  # Big candles = chasing pump, skip
+        # -- Step 6: ENTRY CONDITIONS --
+        # Entry A: HL ke-2+ trendline touch
+        near_trendline = False
+        if trendline_price and trendline_price > 0 and len(hl_indices) >= 2:
+            distance_pct = ((current_price - trendline_price) / trendline_price) * 100
+            near_trendline = (-1.0 <= distance_pct <= 2.0)
 
-        # ══ ALL CONDITIONS MET — GENERATE SIGNAL ══
+        # Entry B: Demand 3x retest
+        near_demand_3x = False
+        if nearest_demand and demand_retest_count >= 2:
+            dz_distance = ((current_price - nearest_demand['mid']) / nearest_demand['mid']) * 100
+            near_demand_3x = (-1.0 <= dz_distance <= 2.0)
+
+        if not near_trendline and not near_demand_3x:
+            return None
+
+        # -- Step 7: MAX RISE FILTER --
+        recent_high = df['high'].iloc[-30:].max()
+        total_rise = ((recent_high - first_hl_price) / first_hl_price) * 100
+        if total_rise > 25.0:
+            return None  # Sudah pump terlalu tinggi
+
+        # -- Step 8: PULLBACK DIRECTION --
+        if len(df) >= 4:
+            c0 = current_price
+            c1 = df['close'].iloc[-2]
+            c2 = df['close'].iloc[-3]
+            c3 = df['close'].iloc[-4]
+            if c0 > c1 > c2 > c3:
+                support_level = trendline_price if near_trendline else (nearest_demand['mid'] if nearest_demand else None)
+                if support_level and ((c0 - support_level) / support_level * 100) > 1.5:
+                    return None  # 4 candle naik berturut, bukan pullback
+
+        # -- Step 9: No pump candles --
+        if is_pump_candle(df, atr):
+            return None
+
+        # == SIGNAL ==
         entry_price = current_price
         current_atr = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else entry_price * 0.02
 
-        # [FIX #2 + TF-aware] SL berbasis ATR dengan multiplier sesuai timeframe
-        # M15=1.5x, H1=2.0x, H4=2.5x — RR tetap 1:2 semua TF
         atr_mult = ATR_SL_MULT.get(timeframe, ATR_SL_MULT_DEFAULT)
         atr_sl_distance = current_atr * atr_mult
 
         if near_trendline and trendline_price:
-            # SL di bawah trendline atau 1.5x ATR, pilih yang LEBIH JAUH
             trendline_sl = trendline_price * (1 - SL_BUFFER_PCT / 100)
             sl_price = min(trendline_sl, entry_price - atr_sl_distance)
         elif nearest_demand:
-            # SL di bawah demand zone, min sesuai ATR TF
             demand_sl = nearest_demand['low'] * (1 - SL_BUFFER_PCT / 100)
             sl_price = min(demand_sl, entry_price - atr_sl_distance)
         else:
-            sl_price = entry_price - atr_sl_distance  # Fallback ATR
+            sl_price = entry_price - atr_sl_distance
 
-        # Minimum SL floor: M15=1.5%, H1=2.0%, H4=2.5%
-        min_sl_pct = atr_mult / 100.0  # proporsional dengan multiplier
+        min_sl_pct = atr_mult / 100.0
         min_sl_floor = entry_price * min_sl_pct
         if (entry_price - sl_price) < min_sl_floor:
             sl_price = entry_price - min_sl_floor
 
-        # TP: Risk:Reward ratio
         sl_distance = entry_price - sl_price
         tp_price = entry_price + (sl_distance * DEFAULT_RR_RATIO)
 
-        # SL/TP percentages
         sl_pct = ((entry_price - sl_price) / entry_price) * 100
         tp_pct = ((tp_price - entry_price) / entry_price) * 100
 
-        # Resistance estimate (for reference)
         accum = detect_accumulation_zone(df, p_highs, p_lows)
         resistance = accum['resistance'] if accum else tp_price
         support = trendline_price if trendline_price else sl_price
 
-        # Higher Low values
         hl_prices = [round(df['low'].iloc[i], 6) for i in hl_indices]
 
-        # Entry type label
-        entry_type = 'TRENDLINE_PULLBACK' if near_trendline else 'DEMAND_BOUNCE'
+        if near_trendline:
+            entry_type = 'HL_TRENDLINE_TOUCH'
+        else:
+            entry_type = 'DEMAND_3X_RETEST'
+
+        vol_sma = calc_volume_sma(df, 20)
 
         signal = {
             'symbol': symbol,
@@ -515,41 +572,26 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             'sl_pct': round(sl_pct, 2),
             'tp_pct': round(tp_pct, 2),
             'rr_ratio': round(DEFAULT_RR_RATIO, 1),
-
-            # Structure
-            'resistance': round(resistance, 8),
+            'resistance': round(resistance, 8) if resistance else 0,
             'support': round(support, 8),
-            'accum_range_pct': round(accum['range_pct'], 2) if accum else 0,
-            'accum_candles': accum['candles_in_zone'] if accum else 0,
             'higher_lows': hl_prices,
             'hl_touches': len(hl_indices),
             'demand_zone': nearest_demand,
+            'demand_retest_count': demand_retest_count,
             'trendline_price': round(trendline_price, 8) if trendline_price else None,
-
-            # Confirmations
+            'trendline_slope': round(slope_per_candle, 8),
+            'total_rise_pct': round(total_rise, 1),
             'volume_ratio': round(df['volume'].iloc[-1] / vol_sma.iloc[-1], 2) if vol_sma.iloc[-1] > 0 else 1.0,
-            'stoch_k': stoch_info['stoch_k'],
-            'stoch_d': stoch_info['stoch_d'],
-            'stoch_signal': stoch_info['signal'],
             'atr': round(current_atr, 8),
             'atr_pct': round((current_atr / entry_price) * 100, 2),
-
-            # Confidence score
-            'confidence': _calc_confidence(
-                hl_touches=len(hl_indices),
-                vol_ratio=round(df['volume'].iloc[-1] / vol_sma.iloc[-1], 2) if vol_sma.iloc[-1] > 0 else 1.0,
-                stoch_signal=stoch_info['signal'],
-                has_demand=nearest_demand is not None,
-                accum_candles=accum['candles_in_zone'] if accum else 0,
-            ),
+            'confidence': min(100, 40 + len(hl_indices) * 15 + (10 if nearest_demand else 0) + min(demand_retest_count * 10, 30)),
         }
 
-        log.info(f"🎯 SIGNAL [{entry_type}]: {symbol} {timeframe} | "
+        log.info(f"🎯 [{entry_type}]: {symbol} {timeframe} | "
                  f"Entry={entry_price:.6f} SL={sl_price:.6f} ({sl_pct:.1f}%) "
                  f"TP={tp_price:.6f} ({tp_pct:.1f}%) | "
-                 f"Stoch={stoch_info['stoch_k']:.0f}/{stoch_info['stoch_d']:.0f} "
-                 f"HL={len(hl_indices)} touches | "
-                 f"Conf={signal['confidence']}")
+                 f"HL={len(hl_indices)} Slope={slope_per_candle:.6f} Rise={total_rise:.1f}% "
+                 f"DemandRetest={demand_retest_count}x")
 
         return signal
 
@@ -585,9 +627,9 @@ def _calc_trendline_value(df: pd.DataFrame, hl_indices: List[int]) -> Optional[f
     current_idx = len(df) - 1
     candles_since_last_hl = current_idx - idx2
 
-    # [FIX #6] Batasi proyeksi maks 10 candle dari HL terakhir
-    # Jika HL terakhir sudah > 10 candle yang lalu, trendline dianggap expired
-    if candles_since_last_hl > 10:
+    # Batasi proyeksi maks 30 candle dari HL terakhir
+    # Harus cukup panjang untuk menangkap pullback yang valid
+    if candles_since_last_hl > 30:
         return None
 
     trendline_at_now = price2 + slope * candles_since_last_hl
@@ -617,6 +659,32 @@ def _is_volume_rising(df: pd.DataFrame, lookback: int = 5) -> bool:
     return recent_avg > prior_avg
 
 
+def is_pump_candle(df: pd.DataFrame, atr: pd.Series, lookback: int = None) -> bool:
+    """
+    Pump Candle Detector — detects abnormally large candles on ENTRY timeframe.
+    Called INSIDE analyze() to prevent chasing pump candles.
+    
+    Returns True if PUMP detected (should REJECT entry):
+    - ANY of last N candles has body > 2.5x ATR = pump candle, NOT a pullback
+    """
+    if df is None or len(df) < 10:
+        return False
+    
+    lb = lookback if lookback else PUMP_LOOKBACK
+    
+    for j in range(1, lb + 1):
+        idx = len(df) - j
+        if idx < 0:
+            break
+        body = abs(df['close'].iloc[idx] - df['open'].iloc[idx])
+        atr_val = atr.iloc[idx] if idx < len(atr) else None
+        if atr_val is not None and not pd.isna(atr_val) and atr_val > 0:
+            if body > atr_val * PUMP_CANDLE_BODY_MULT:
+                return True  # Pump candle found
+    
+    return False
+
+
 def _is_consolidating(df: pd.DataFrame, atr: pd.Series, lookback: int = 5) -> bool:
     """
     Check if recent candles show consolidation (small bodies).
@@ -642,29 +710,51 @@ def _is_consolidating(df: pd.DataFrame, atr: pd.Series, lookback: int = 5) -> bo
 
 def is_pucuk(df: pd.DataFrame) -> bool:
     """
-    Pucuk Protector — Detect if price is at the peak/overheated.
+    Pucuk Protector v3 — KETAT. Detect if price is at peak/pump.
     Used on H4 and D1 timeframes to block entries.
 
-    Returns True if PUCUK (should REJECT entry):
-    1. Stochastic %K > 80 (Overbought)
-    2. Price > 8% above SMA-20 (Overextended / Tali karet)
+    Returns True if PUCUK (should REJECT entry) if ANY of:
+    1. Stochastic %K > 75 (Overbought) — turunkan dari 80
+    2. Price > 4% above SMA-20 (Overextended) — turunkan dari 8%
+    3. ANY of last 5 candles has body > 2.5x ATR (Pump candle)
+    4. Price rose > 5% in last 5 candles (Rapid rise)
     """
     if df is None or len(df) < 20:
         return False  # Not enough data, allow
 
-    # Stochastic check
+    current_price = df['close'].iloc[-1]
+
+    # Check 1: Stochastic overbought
     stoch_k, _ = calc_stochastic(df, STOCH_K, STOCH_SMOOTH_K, STOCH_D)
     k_now = stoch_k.iloc[-1]
-    if not pd.isna(k_now) and k_now > PUCUK_STOCH_THRESHOLD:
-        return True  # PUCUK: Stochastic overbought
+    if not pd.isna(k_now) and k_now > 82:
+        return True  # PUCUK: Stochastic overbought (82+)
 
-    # SMA distance check
+    # Check 2: SMA distance (turunkan ke 4%)
     sma_20 = df['close'].rolling(window=20).mean().iloc[-1]
-    current_price = df['close'].iloc[-1]
     if not pd.isna(sma_20) and sma_20 > 0:
         distance_pct = ((current_price - sma_20) / sma_20) * 100
-        if distance_pct > PUCUK_SMA_DISTANCE_PCT:
-            return True  # PUCUK: Price too far above SMA
+        if distance_pct > 7.0:
+            return True  # PUCUK: Price >7% above SMA
+
+    # Check 3: Pump candle detection — ANY candle terakhir body > 2.5x ATR
+    atr = calc_atr(df, 14)
+    lookback = min(PUMP_LOOKBACK, len(df) - 1)
+    for j in range(1, lookback + 1):
+        idx = len(df) - j
+        body = abs(df['close'].iloc[idx] - df['open'].iloc[idx])
+        atr_val = atr.iloc[idx]
+        if not pd.isna(atr_val) and atr_val > 0:
+            if body > atr_val * PUMP_CANDLE_BODY_MULT:
+                return True  # PUCUK: Pump candle detected
+
+    # Check 4: Rapid rise — harga naik > 5% dalam 5 candle
+    if len(df) > PUMP_LOOKBACK:
+        old_price = df['close'].iloc[-PUMP_LOOKBACK - 1]
+        if old_price > 0:
+            rise_pct = ((current_price - old_price) / old_price) * 100
+            if rise_pct > PUMP_RISE_PCT:
+                return True  # PUCUK: Rapid rise, momentum exhaustion
 
     return False  # Not pucuk, safe to enter
 
@@ -744,34 +834,57 @@ def is_bullish_structure(df: pd.DataFrame) -> bool:
     """
     Pure Price Action trend detection for Triple Screen (H1/H4).
     
-    [FIX #4] Diganti ke SMA-20 (sebelumnya SMA-5 yang terlalu sensitif).
-    Trend diakui Bullish hanya jika:
+    [FIX v2] KETAT — Tidak ada fallback.
+    Trend diakui Bullish HANYA jika:
     1. Pivot Low terakhir > pivot Low sebelumnya (Higher Low terkonfirmasi), DAN
     2. Harga Close saat ini > SMA-20 (uptrend jangka menengah terkonfirmasi).
     
-    Syarat 1 dan 2 KEDUANYA harus terpenuhi agar tidak salah baca sideways sebagai uptrend.
+    Jika TIDAK ADA Higher Low yang valid, return False. Titik.
     """
     if len(df) < 25:
         return False
 
     c = df['close'].iloc[-1]
 
-    # [FIX #4] Gunakan SMA-20 sebagai filter tren, bukan SMA-5
+    # SMA-20 sebagai filter tren dasar
     sma20 = df['close'].rolling(window=20).mean().iloc[-1]
     if pd.isna(sma20) or c <= sma20:
         return False  # Harga di bawah SMA-20 = TIDAK bullish
 
-    # Higher Low check via Pivots — harus ada pola HL yang valid
+    # EMA-50 sebagai filter tren menengah (mencegah bear rally)
+    ema50 = df['close'].ewm(span=50, adjust=False).mean().iloc[-1]
+    if pd.isna(ema50) or c <= ema50:
+        return False  # Harga di bawah EMA-50 = masih dalam downtrend
+
+    # Higher Low check via Pivots — WAJIB ada pola HL yang valid
     p_lows = detect_pivot_lows(df)
     if len(p_lows) >= 2:
         last_low = df['low'].iloc[p_lows[-1]]
         prev_low = df['low'].iloc[p_lows[-2]]
         if last_low > prev_low:
-            return True  # Tren terkonfirmasi: HL + harga di atas SMA-20
+            return True  # Tren terkonfirmasi: HL + SMA20 + EMA50
 
-    # Fallback: SMA-20 cukup sebagai filter minimum (tidak ada pivot terkini)
-    # Ini terjadi jika data terlalu pendek untuk pivot, tapi close > SMA20
-    return True
+    # TIDAK ADA FALLBACK — tanpa HL yang valid, TOLAK
+    return False
+
+
+def is_macro_bullish(d1_df: pd.DataFrame) -> bool:
+    """
+    Macro trend filter menggunakan EMA-50 pada Daily timeframe.
+    Jika harga D1 di bawah EMA-50, market sedang bearish — JANGAN entry long.
+    """
+    if d1_df is None or len(d1_df) < 55:
+        return False
+    
+    c = d1_df['close'].iloc[-1]
+    ema50 = d1_df['close'].ewm(span=50, adjust=False).mean().iloc[-1]
+    sma20 = d1_df['close'].rolling(window=20).mean().iloc[-1]
+    
+    if pd.isna(ema50) or pd.isna(sma20):
+        return False
+    
+    # Harga HARUS di atas EMA-50 DAN SMA-20 pada Daily
+    return c > ema50 and c > sma20
 
 
 def is_volume_confirmed(df: pd.DataFrame, lookback: int = 20) -> bool:
@@ -791,3 +904,268 @@ def is_volume_confirmed(df: pd.DataFrame, lookback: int = 20) -> bool:
     
     # Volume on the higher timeframe must be at least equal to its average
     return vol_now >= vol_sma
+
+
+# ══════════════════════════════════════════════════════════════
+# SHORT TRADING — Mirror of LONG logic for bearish markets
+# ══════════════════════════════════════════════════════════════
+
+def detect_lower_highs(df: pd.DataFrame, p_highs: List[int]) -> Tuple[bool, List[int]]:
+    """
+    Detect Lower Highs pattern — mirror of Higher Lows.
+    Each pivot high must be LOWER than the previous one.
+    """
+    if len(p_highs) < MIN_HL_TOUCHES:
+        return False, []
+
+    lh_indices = [p_highs[0]]
+    for i in range(1, len(p_highs)):
+        curr_high = df['high'].iloc[p_highs[i]]
+        prev_high = df['high'].iloc[lh_indices[-1]]
+        gap = p_highs[i] - lh_indices[-1]
+
+        if curr_high < prev_high and gap >= MIN_HL_CANDLE_GAP:
+            lh_indices.append(p_highs[i])
+
+    if len(lh_indices) < MIN_HL_TOUCHES:
+        return False, []
+    if len(lh_indices) > MAX_HL_TOUCHES:
+        lh_indices = lh_indices[-MAX_HL_TOUCHES:]
+
+    return True, lh_indices
+
+
+def _calc_resistance_trendline(df: pd.DataFrame, lh_indices: List[int]) -> Optional[float]:
+    """Calculate resistance trendline from Lower Highs (for short entries)."""
+    if len(lh_indices) < 2:
+        return None
+
+    idx1 = lh_indices[-2]
+    idx2 = lh_indices[-1]
+    price1 = df['high'].iloc[idx1]
+    price2 = df['high'].iloc[idx2]
+
+    if idx2 == idx1:
+        return price2
+
+    slope = (price2 - price1) / (idx2 - idx1)
+    current_idx = len(df) - 1
+    candles_since = current_idx - idx2
+
+    if candles_since > 10:
+        return None
+
+    trendline_at_now = price2 + slope * candles_since
+
+    if trendline_at_now <= 0 or slope > 0:  # slope harus negatif untuk downtrend
+        return None
+
+    return trendline_at_now
+
+
+def is_bearish_structure(df: pd.DataFrame) -> bool:
+    """
+    Bearish structure detection — mirror of is_bullish_structure.
+    Returns True if H4/D1 shows confirmed downtrend:
+    1. Pivot High terakhir < pivot High sebelumnya (Lower High), DAN
+    2. Harga < SMA-20 DAN < EMA-50
+    """
+    if len(df) < 25:
+        return False
+
+    c = df['close'].iloc[-1]
+    sma20 = df['close'].rolling(window=20).mean().iloc[-1]
+    if pd.isna(sma20) or c >= sma20:
+        return False
+
+    ema50 = df['close'].ewm(span=50, adjust=False).mean().iloc[-1]
+    if pd.isna(ema50) or c >= ema50:
+        return False
+
+    p_highs = detect_pivot_highs(df)
+    if len(p_highs) >= 2:
+        last_high = df['high'].iloc[p_highs[-1]]
+        prev_high = df['high'].iloc[p_highs[-2]]
+        if last_high < prev_high:
+            return True
+
+    return False
+
+
+def is_macro_bearish(d1_df: pd.DataFrame) -> bool:
+    """
+    Macro bearish filter — D1 harus di bawah EMA-50 untuk konfirmasi downtrend.
+    """
+    if d1_df is None or len(d1_df) < 55:
+        return False
+
+    c = d1_df['close'].iloc[-1]
+    ema50 = d1_df['close'].ewm(span=50, adjust=False).mean().iloc[-1]
+    sma20 = d1_df['close'].rolling(window=20).mean().iloc[-1]
+
+    if pd.isna(ema50) or pd.isna(sma20):
+        return False
+
+    return c < ema50 and c < sma20
+
+
+def is_dasar(df: pd.DataFrame) -> bool:
+    """
+    Dasar (Bottom) Protector — mirror of is_pucuk.
+    Blocks SHORT entries when price is already at oversold bottom.
+    Returns True if DASAR (should REJECT short entry).
+    """
+    if df is None or len(df) < 20:
+        return False
+
+    stoch_k, _ = calc_stochastic(df, STOCH_K, STOCH_SMOOTH_K, STOCH_D)
+    k_now = stoch_k.iloc[-1]
+    if not pd.isna(k_now) and k_now < (100 - PUCUK_STOCH_THRESHOLD):  # < 20
+        return True
+
+    sma_20 = df['close'].rolling(window=20).mean().iloc[-1]
+    current_price = df['close'].iloc[-1]
+    if not pd.isna(sma_20) and sma_20 > 0:
+        distance_pct = ((sma_20 - current_price) / sma_20) * 100
+        if distance_pct > PUCUK_SMA_DISTANCE_PCT:
+            return True
+
+    return False
+
+
+def check_stochastic_short(stoch_k: pd.Series, stoch_d: pd.Series) -> Tuple[bool, Dict]:
+    """
+    Stochastic confirmation for SHORT — bearish cross from overbought.
+    """
+    if len(stoch_k) < 3 or len(stoch_d) < 3:
+        return False, {}
+
+    k_now = stoch_k.iloc[-1]
+    k_prev = stoch_k.iloc[-2]
+    d_now = stoch_d.iloc[-1]
+    d_prev = stoch_d.iloc[-2]
+
+    if pd.isna(k_now) or pd.isna(d_now):
+        return False, {}
+
+    details = {'stoch_k': round(k_now, 1), 'stoch_d': round(d_now, 1), 'signal': ''}
+
+    # Bearish cross: K was above D, now below D
+    is_bearish_cross = (k_prev >= d_prev) and (k_now < d_now)
+    # Sweet spot: 50-80 (overbought zone tapi belum extreme)
+    is_in_sweet_spot = (k_now >= (100 - STOCH_ENTRY_MAX)) and (k_now <= (100 - STOCH_ENTRY_MIN))
+
+    if is_bearish_cross and is_in_sweet_spot:
+        details['signal'] = 'BEARISH_CROSS_SWEET_SPOT'
+        return True, details
+
+    return False, details
+
+
+def analyze_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
+    """
+    Kalimasada SHORT Strategy — Entry at Resistance/LH Trendline Pullback.
+    Mirror of analyze() for bearish markets.
+
+    Pipeline:
+    1. Calculate indicators
+    2. Detect pivot highs
+    3. Detect Lower Highs (LH trendline)
+    4. Check: is price NEAR resistance trendline?
+    5. Check: is volume rising?
+    6. Check: Stochastic bearish cross from high area
+    7. Calculate SL/TP (inverted)
+    """
+    if df is None or len(df) < 50:
+        return None
+
+    try:
+        stoch_k, stoch_d = calc_stochastic(df, STOCH_K, STOCH_SMOOTH_K, STOCH_D)
+        vol_sma = calc_volume_sma(df, 20)
+        atr = calc_atr(df, 14)
+
+        p_highs = detect_pivot_highs(df)
+        p_lows = detect_pivot_lows(df)
+
+        if len(p_highs) < 2:
+            return None
+
+        has_lh, lh_indices = detect_lower_highs(df, p_highs)
+        if not has_lh:
+            return None
+
+        # Resistance trendline
+        resistance_price = _calc_resistance_trendline(df, lh_indices)
+        current_price = df['close'].iloc[-1]
+
+        near_resistance = False
+        if resistance_price and resistance_price > 0:
+            distance_pct = ((resistance_price - current_price) / resistance_price) * 100
+            near_resistance = (-0.5 <= distance_pct <= TRENDLINE_TOLERANCE_PCT)
+
+        if not near_resistance:
+            return None
+
+        # Volume rising
+        if not _is_volume_rising(df):
+            return None
+
+        # Stochastic bearish
+        stoch_ok, stoch_info = check_stochastic_short(stoch_k, stoch_d)
+        if not stoch_ok:
+            return None
+
+        # Consolidation check
+        if not _is_consolidating(df, atr):
+            return None
+
+        # === SIGNAL — SHORT ===
+        entry_price = current_price
+        current_atr = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else entry_price * 0.02
+
+        atr_mult = ATR_SL_MULT.get(timeframe, ATR_SL_MULT_DEFAULT)
+        atr_sl_distance = current_atr * atr_mult
+
+        # SL ABOVE resistance, TP BELOW entry
+        if resistance_price:
+            resistance_sl = resistance_price * (1 + SL_BUFFER_PCT / 100)
+            sl_price = max(resistance_sl, entry_price + atr_sl_distance)
+        else:
+            sl_price = entry_price + atr_sl_distance
+
+        sl_distance = sl_price - entry_price
+        tp_price = entry_price - (sl_distance * DEFAULT_RR_RATIO)
+
+        sl_pct = ((sl_price - entry_price) / entry_price) * 100
+        tp_pct = ((entry_price - tp_price) / entry_price) * 100
+
+        signal = {
+            'symbol': symbol,
+            'timeframe': timeframe,
+            'signal_type': 'SHORT_RESISTANCE_PULLBACK',
+            'direction': 'SHORT',
+            'entry_price': round(entry_price, 8),
+            'sl_price': round(sl_price, 8),
+            'tp_price': round(tp_price, 8),
+            'sl_pct': round(sl_pct, 2),
+            'tp_pct': round(tp_pct, 2),
+            'rr_ratio': round(DEFAULT_RR_RATIO, 1),
+            'lower_highs': [round(df['high'].iloc[i], 6) for i in lh_indices],
+            'lh_touches': len(lh_indices),
+            'resistance_price': round(resistance_price, 8) if resistance_price else None,
+            'stoch_k': stoch_info.get('stoch_k', 0),
+            'stoch_d': stoch_info.get('stoch_d', 0),
+            'stoch_signal': stoch_info.get('signal', ''),
+            'atr': round(current_atr, 8),
+            'confidence': 50,
+        }
+
+        log.info(f"🎯 SHORT SIGNAL: {symbol} {timeframe} | "
+                 f"Entry={entry_price:.6f} SL={sl_price:.6f} ({sl_pct:.1f}%) "
+                 f"TP={tp_price:.6f} ({tp_pct:.1f}%)")
+
+        return signal
+
+    except Exception as e:
+        log.error(f"Short strategy error for {symbol} {timeframe}: {e}")
+        return None

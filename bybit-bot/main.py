@@ -200,7 +200,7 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
             f"💰 Equity: ${equity:.2f}\n"
             f"⚙️ Testnet: {BYBIT_TESTNET}\n"
             f"📊 Timeframes: {', '.join(TIMEFRAMES)}\n"
-            f"🎯 Strategy: Accumulation Breakout + Alpha\n"
+            f"🎯 Strategy: Kalimasada v6 Ascending Triangle (LONG)\n"
             f"📅 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
         )
 
@@ -508,7 +508,7 @@ def _get_last_close_price(executor: BybitExecutor, bybit_symbol: str) -> float:
 async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle."""
     log.info("=" * 60)
-    log.info("🤖 BYBIT ALPHA BOT — Accumulation Breakout Engine")
+    log.info("🤖 BYBIT ALPHA BOT — Kalimasada v6 Ascending Triangle")
     log.info("=" * 60)
 
     # Validate config

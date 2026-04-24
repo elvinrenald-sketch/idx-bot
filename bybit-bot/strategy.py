@@ -461,6 +461,11 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         if gap_last_to_resistance >= gap_first_to_resistance:
             return None  # Triangle tidak menyempit = bukan kompresi
 
+        # ALPHA: Hitung compression percentage (untuk filter downstream)
+        compression_pct = 0.0
+        if gap_first_to_resistance > 0:
+            compression_pct = ((gap_first_to_resistance - gap_last_to_resistance) / gap_first_to_resistance) * 100
+
 
         # -- Step 4: Demand Zone + Retest Count --
         demand_zones = detect_demand_zones(df, lookback=200)
@@ -481,6 +486,20 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
                     candle_close = df['close'].iloc[k]
                     if candle_low <= dz_high * 1.01 and candle_close > dz_high * 0.99:
                         demand_retest_count += 1
+
+        # -- ALPHA: Volume Surge at Support --
+        # Cek apakah volume meningkat di area pivot lows (tanda akumulasi institusi)
+        vol_sma_20 = df['volume'].rolling(20).mean()
+        vol_at_support_score = 0
+        for hl_idx in hl_indices[-3:]:
+            if hl_idx < len(df) and hl_idx < len(vol_sma_20):
+                vol_at_hl = df['volume'].iloc[hl_idx]
+                vol_avg = vol_sma_20.iloc[hl_idx]
+                if not pd.isna(vol_avg) and vol_avg > 0:
+                    if vol_at_hl >= vol_avg * 2.0:
+                        vol_at_support_score += 2  # Volume spike 2x = strong
+                    elif vol_at_hl >= vol_avg * 1.5:
+                        vol_at_support_score += 1  # Volume above avg
 
         # -- Step 5: Trendline value --
         trendline_price = _calc_trendline_value(df, hl_indices)
@@ -565,6 +584,7 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         signal = {
             'symbol': symbol,
             'timeframe': timeframe,
+            'direction':   'LONG',
             'signal_type': entry_type,
             'entry_price': round(entry_price, 8),
             'sl_price': round(sl_price, 8),
@@ -582,9 +602,11 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             'trendline_slope': round(slope_per_candle, 8),
             'total_rise_pct': round(total_rise, 1),
             'volume_ratio': round(df['volume'].iloc[-1] / vol_sma.iloc[-1], 2) if vol_sma.iloc[-1] > 0 else 1.0,
+            'vol_at_support_score': vol_at_support_score,
+            'compression_pct': round(compression_pct, 1),
             'atr': round(current_atr, 8),
             'atr_pct': round((current_atr / entry_price) * 100, 2),
-            'confidence': min(100, 40 + len(hl_indices) * 15 + (10 if nearest_demand else 0) + min(demand_retest_count * 10, 30)),
+            'confidence': min(100, 40 + len(hl_indices) * 15 + (10 if nearest_demand else 0) + min(demand_retest_count * 10, 30) + vol_at_support_score * 5),
         }
 
         log.info(f"🎯 [{entry_type}]: {symbol} {timeframe} | "
@@ -597,6 +619,256 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
 
     except Exception as e:
         log.error(f"Strategy error for {symbol} {timeframe}: {e}")
+        return None
+
+
+# ══════════════════════════════════════════════════════════════
+# ANALYZE SHORT — Descending Triangle (Mirror of analyze LONG)
+# ══════════════════════════════════════════════════════════════
+
+def analyze_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
+    """
+    Kalimasada v7 — SHORT via Descending Triangle (PURE PRICE ACTION)
+
+    Struktur yang dicari (kebalikan sempurna dari Ascending Triangle):
+    1. LANTAI DATAR (Flat Support): Min 2 Pivot Low dalam toleransi 3%
+       → Menandakan ada buyer terakhir yang menahan di level tersebut
+    2. ATAP MENURUN (Lower Highs): Pivot High makin rendah (slope negatif)
+       → Menandakan seller makin agresif menekan harga
+    3. KOMPRESI AKTIF: Jarak dari LH ke Support semakin menyempit
+       → Harga seperti "per" yang ditekan — begitu lantai jebol, dump keras
+    4. Entry: Di trendline atap menurun (LH touch) ATAU di Supply 3x retest
+    5. SL: Di atas LH terakhir
+    6. TP: SL distance ke bawah × RR Ratio
+    """
+    if df is None or len(df) < 50:
+        return None
+
+    try:
+        atr = calc_atr(df, 14)
+        current_price = df['close'].iloc[-1]
+
+        # -- Step 1: Pivots --
+        p_lows = detect_pivot_lows(df)
+        p_highs = detect_pivot_highs(df)
+
+        if len(p_highs) < 2:
+            return None
+
+        # -- Step 2: Lower Highs (Atap Menurun — slope NEGATIF) --
+        highs_arr = df['high'].values
+        # Cari sekuens Lower Highs yang valid
+        best_lh_seq = []
+        current_lh_seq = [p_highs[0]]
+
+        for i in range(1, len(p_highs)):
+            prev_idx = p_highs[i - 1]
+            curr_idx = p_highs[i]
+            if (curr_idx - prev_idx) < MIN_HL_CANDLE_GAP:
+                continue
+            if highs_arr[curr_idx] < highs_arr[prev_idx]:  # Lower High
+                current_lh_seq.append(curr_idx)
+            else:
+                if len(current_lh_seq) > len(best_lh_seq):
+                    best_lh_seq = current_lh_seq[:]
+                current_lh_seq = [curr_idx]
+
+        if len(current_lh_seq) > len(best_lh_seq):
+            best_lh_seq = current_lh_seq[:]
+
+        # Butuh minimal 2 Lower Highs, dan LH terakhir harus dalam 30 candle terakhir
+        if len(best_lh_seq) < 2 or best_lh_seq[-1] < len(df) - 30:
+            return None
+
+        lh_indices = best_lh_seq
+        first_lh_idx  = lh_indices[0]
+        last_lh_idx   = lh_indices[-1]
+        first_lh_price = df['high'].iloc[first_lh_idx]
+        last_lh_price  = df['high'].iloc[last_lh_idx]
+
+        # Pastikan slope NEGATIF
+        if last_lh_price >= first_lh_price:
+            return None
+
+        lh_candle_span = last_lh_idx - first_lh_idx
+        if lh_candle_span <= 0:
+            return None
+        lh_slope_per_candle = (last_lh_price - first_lh_price) / lh_candle_span  # negatif
+
+        # -- Step 3: FLAT SUPPORT (Lantai Datar) --
+        FLAT_SUPPORT_TOLERANCE = 3.0  # max 3% perbedaan antar Pivot Low
+        flat_support_valid   = False
+        flat_support_level   = None
+
+        if len(p_lows) >= 2:
+            relevant_lows = [i for i in p_lows if i >= first_lh_idx]
+            if len(relevant_lows) >= 2:
+                pl_prices = [df['low'].iloc[i] for i in relevant_lows[-5:]]
+                pl_max = max(pl_prices)
+                pl_min = min(pl_prices)
+                spread_pct = ((pl_max - pl_min) / pl_max) * 100
+                if spread_pct <= FLAT_SUPPORT_TOLERANCE:
+                    flat_support_valid = True
+                    flat_support_level = (pl_max + pl_min) / 2
+
+        if not flat_support_valid:
+            return None  # Bukan Descending Triangle sejati
+
+        # Harga HARUS masih di atas support (belum breakdown)
+        if current_price <= flat_support_level * 1.02:
+            return None  # Harga sudah breakdown atau terlalu dekat support
+
+        # -- Step 4: KOMPRESI AKTIF (Triangle semakin menyempit dari atas) --
+        gap_first_to_support = ((first_lh_price - flat_support_level) / first_lh_price) * 100
+        gap_last_to_support  = ((last_lh_price  - flat_support_level) / last_lh_price)  * 100
+        if gap_last_to_support >= gap_first_to_support:
+            return None  # Triangle tidak menyempit = bukan kompresi
+
+        # -- Step 5: Supply Zone + Retest Count (kebalikan Demand Zone) --
+        supply_retest_count = 0
+        nearest_supply = None
+
+        # Supply zone = area di mana harga turun kencang (bearish candle kuat)
+        supply_zones = []
+        start_idx = max(3, len(df) - 200)
+        for i in range(start_idx, len(df) - 1):
+            body = df['open'].iloc[i] - df['close'].iloc[i]  # bearish body
+            candle_range = df['high'].iloc[i] - df['low'].iloc[i]
+            if candle_range <= 0:
+                continue
+            body_ratio = body / candle_range
+            if body_ratio < 0.55:
+                continue
+            prev_avg_close = df['close'].iloc[max(0, i - 3):i].mean()
+            if df['high'].iloc[i] <= prev_avg_close:
+                continue
+            zone_high = df['high'].iloc[i]
+            zone_low  = max(df['open'].iloc[i], df['close'].iloc[i])
+            zone_mid  = (zone_high + zone_low) / 2
+            supply_zones.append({'low': zone_low, 'high': zone_high, 'mid': zone_mid, 'index': i, 'strength': body_ratio})
+
+        if supply_zones:
+            valid_supplies = [sz for sz in supply_zones if sz['low'] >= current_price * 0.95]
+            if valid_supplies:
+                nearest_supply = min(valid_supplies, key=lambda x: x['low'])
+                sz_idx  = nearest_supply['index']
+                sz_low  = nearest_supply['low']
+                for k in range(sz_idx + 3, len(df)):
+                    candle_high  = df['high'].iloc[k]
+                    candle_close = df['close'].iloc[k]
+                    if candle_high >= sz_low * 0.99 and candle_close < sz_low * 1.01:
+                        supply_retest_count += 1
+
+        # -- Step 6: Trendline LH value at current candle --
+        lh_trendline_price = None
+        candles_since_last_lh = (len(df) - 1) - last_lh_idx
+        if candles_since_last_lh <= 30:
+            lh_slope = lh_slope_per_candle
+            lh_trendline_price = last_lh_price + lh_slope * candles_since_last_lh
+
+        # -- Step 7: ENTRY CONDITIONS --
+        # Entry A: Harga menyentuh trendline LH (pantulan ke bawah dari atap)
+        near_lh_trendline = False
+        if lh_trendline_price and lh_trendline_price > 0:
+            dist_pct = ((lh_trendline_price - current_price) / lh_trendline_price) * 100
+            near_lh_trendline = (-2.0 <= dist_pct <= 1.0)  # harga mendekati/menyentuh LH trendline
+
+        # Entry B: Supply Zone 3x retest
+        near_supply_3x = False
+        if nearest_supply and supply_retest_count >= 2:
+            sz_dist = ((nearest_supply['mid'] - current_price) / nearest_supply['mid']) * 100
+            near_supply_3x = (-2.0 <= sz_dist <= 1.0)
+
+        if not near_lh_trendline and not near_supply_3x:
+            return None
+
+        # -- Step 8: MAX DROP FILTER (jangan short yang sudah dump terlalu dalam) --
+        recent_low = df['low'].iloc[-30:].min()
+        total_drop = ((first_lh_price - recent_low) / first_lh_price) * 100
+        if total_drop > 30.0:
+            return None  # Sudah oversold terlalu dalam
+
+        # -- Step 9: Anti dump candle besar (jangan short saat baru saja dump keras) --
+        # Jika 3 candle terakhir rata-rata body > 2.5x ATR, harga sudah oversold sementara
+        last_bodies = [abs(df['close'].iloc[-j] - df['open'].iloc[-j]) for j in range(1, min(4, len(df)))]
+        avg_body = sum(last_bodies) / len(last_bodies) if last_bodies else 0
+        atr_check = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else 0
+        if atr_check > 0 and avg_body > atr_check * 2.5:
+            return None  # Sudah dump keras, tunggu rebound dulu baru short
+
+        # == SIGNAL SHORT ==
+        entry_price  = current_price
+        current_atr  = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else entry_price * 0.02
+        atr_mult     = ATR_SL_MULT.get(timeframe, ATR_SL_MULT_DEFAULT)
+        atr_sl_dist  = current_atr * atr_mult
+
+        # SL untuk SHORT = di ATAS entry (di atas LH terakhir)
+        if near_lh_trendline and lh_trendline_price:
+            lh_sl = lh_trendline_price * (1 + SL_BUFFER_PCT / 100)
+            sl_price = max(lh_sl, entry_price + atr_sl_dist)
+        elif nearest_supply:
+            supply_sl = nearest_supply['high'] * (1 + SL_BUFFER_PCT / 100)
+            sl_price  = max(supply_sl, entry_price + atr_sl_dist)
+        else:
+            sl_price = entry_price + atr_sl_dist
+
+        # TP untuk SHORT = ke bawah
+        sl_distance = sl_price - entry_price
+        tp_price    = entry_price - (sl_distance * DEFAULT_RR_RATIO)
+
+        # TP boleh tembus flat support (target breakdown Descending Triangle)
+        # Hanya cap jika TP > 15% dari entry (unrealistic)
+        max_tp_dist = entry_price * 0.15
+        if (entry_price - tp_price) > max_tp_dist:
+            tp_price = entry_price - max_tp_dist
+
+        sl_pct = ((sl_price - entry_price) / entry_price) * 100
+        tp_pct = ((entry_price - tp_price) / entry_price) * 100
+
+        lh_prices = [round(df['high'].iloc[i], 6) for i in lh_indices]
+
+        if near_lh_trendline:
+            entry_type = 'LH_TRENDLINE_TOUCH'
+        else:
+            entry_type = 'SUPPLY_3X_RETEST'
+
+        vol_sma = calc_volume_sma(df, 20)
+
+        signal = {
+            'symbol':               symbol,
+            'timeframe':            timeframe,
+            'direction':            'SHORT',
+            'signal_type':          entry_type,
+            'entry_price':          round(entry_price, 8),
+            'sl_price':             round(sl_price, 8),
+            'tp_price':             round(tp_price, 8),
+            'sl_pct':               round(sl_pct, 2),
+            'tp_pct':               round(tp_pct, 2),
+            'rr_ratio':             round(DEFAULT_RR_RATIO, 1),
+            'flat_support':         round(flat_support_level, 8),
+            'lower_highs':          lh_prices,
+            'lh_touches':           len(lh_indices),
+            'supply_zone':          nearest_supply,
+            'supply_retest_count':  supply_retest_count,
+            'lh_trendline_price':   round(lh_trendline_price, 8) if lh_trendline_price else None,
+            'lh_slope':             round(lh_slope_per_candle, 8),
+            'total_drop_pct':       round(total_drop, 1),
+            'volume_ratio':         round(df['volume'].iloc[-1] / vol_sma.iloc[-1], 2) if vol_sma.iloc[-1] > 0 else 1.0,
+            'atr':                  round(current_atr, 8),
+            'atr_pct':              round((current_atr / entry_price) * 100, 2),
+            'confidence':           min(100, 40 + len(lh_indices) * 15 + (10 if nearest_supply else 0) + min(supply_retest_count * 10, 30)),
+        }
+
+        log.info(f"🔻 [SHORT {entry_type}]: {symbol} {timeframe} | "
+                 f"Entry={entry_price:.6f} SL={sl_price:.6f} (+{sl_pct:.1f}%) "
+                 f"TP={tp_price:.6f} ({tp_pct:.1f}%) | "
+                 f"LH={len(lh_indices)} Slope={lh_slope_per_candle:.6f} Drop={total_drop:.1f}% "
+                 f"SupplyRetest={supply_retest_count}x")
+
+        return signal
+
+    except Exception as e:
+        log.error(f"analyze_short error for {symbol} {timeframe}: {e}")
         return None
 
 
@@ -1009,163 +1281,175 @@ def is_macro_bearish(d1_df: pd.DataFrame) -> bool:
     return c < ema50 and c < sma20
 
 
-def is_dasar(df: pd.DataFrame) -> bool:
+# ══════════════════════════════════════════════════════════════
+# BTC WEATHER SYSTEM — Macro Trend Filter
+# ══════════════════════════════════════════════════════════════
+
+def check_btc_weather(btc_d1_df: pd.DataFrame) -> str:
     """
-    Dasar (Bottom) Protector — mirror of is_pucuk.
-    Blocks SHORT entries when price is already at oversold bottom.
-    Returns True if DASAR (should REJECT short entry).
+    BTC Macro Weather System — EMA 20 & EMA 50 Gap Analysis pada Daily.
+
+    Mengatasi kelemahan MA di market sideways dengan mengukur JARAK (gap)
+    antara EMA 20 dan EMA 50, bukan sekadar crossover.
+
+    Returns:
+        'UPTREND'   → EMA20 > EMA50, gap > 3%  → Hanya LONG diizinkan
+        'DOWNTREND' → EMA20 < EMA50, gap > 3%  → Hanya SHORT diizinkan
+        'SIDEWAYS'  → Gap < 3% (MA kusut)       → LONG & SHORT diizinkan
     """
-    if df is None or len(df) < 20:
-        return False
+    if btc_d1_df is None or len(btc_d1_df) < 55:
+        return 'SIDEWAYS'  # Data tidak cukup, izinkan semua
 
-    stoch_k, _ = calc_stochastic(df, STOCH_K, STOCH_SMOOTH_K, STOCH_D)
-    k_now = stoch_k.iloc[-1]
-    if not pd.isna(k_now) and k_now < (100 - PUCUK_STOCH_THRESHOLD):  # < 20
-        return True
+    ema20 = btc_d1_df['close'].ewm(span=20, adjust=False).mean().iloc[-1]
+    ema50 = btc_d1_df['close'].ewm(span=50, adjust=False).mean().iloc[-1]
 
-    sma_20 = df['close'].rolling(window=20).mean().iloc[-1]
-    current_price = df['close'].iloc[-1]
-    if not pd.isna(sma_20) and sma_20 > 0:
-        distance_pct = ((sma_20 - current_price) / sma_20) * 100
-        if distance_pct > PUCUK_SMA_DISTANCE_PCT:
-            return True
+    if pd.isna(ema20) or pd.isna(ema50) or ema50 <= 0:
+        return 'SIDEWAYS'
 
-    return False
+    gap_pct = ((ema20 - ema50) / ema50) * 100
+
+    WEATHER_THRESHOLD = 3.0  # 3% gap minimum untuk konfirmasi tren
+
+    if gap_pct > WEATHER_THRESHOLD:
+        return 'UPTREND'     # ☀️ Cerah: BTC bullish kuat, fokus LONG
+    elif gap_pct < -WEATHER_THRESHOLD:
+        return 'DOWNTREND'   # ⛈️ Badai: BTC bearish kuat, fokus SHORT
+    else:
+        return 'SIDEWAYS'    # ⛅ Berawan: MA kusut, pure price action
 
 
-def check_stochastic_short(stoch_k: pd.Series, stoch_d: pd.Series) -> Tuple[bool, Dict]:
+# ══════════════════════════════════════════════════════════════
+# ALPHA FILTER SYSTEM — 5 Layer Institutional Grade
+# ══════════════════════════════════════════════════════════════
+
+def calc_relative_strength(coin_df: pd.DataFrame, btc_df: pd.DataFrame,
+                           lookback_days: int = 7) -> Optional[float]:
     """
-    Stochastic confirmation for SHORT — bearish cross from overbought.
+    Layer 1: Relative Strength vs BTC.
+    Hitung seberapa kuat koin dibandingkan BTC dalam N hari terakhir.
+
+    RS = coin_return_7d - btc_return_7d
+    RS > 0% = koin outperform BTC (alpha candidate)
+    RS > +5% = koin jauh lebih kuat dari BTC (strong alpha)
+
+    Returns RS percentage, or None if insufficient data.
     """
-    if len(stoch_k) < 3 or len(stoch_d) < 3:
-        return False, {}
-
-    k_now = stoch_k.iloc[-1]
-    k_prev = stoch_k.iloc[-2]
-    d_now = stoch_d.iloc[-1]
-    d_prev = stoch_d.iloc[-2]
-
-    if pd.isna(k_now) or pd.isna(d_now):
-        return False, {}
-
-    details = {'stoch_k': round(k_now, 1), 'stoch_d': round(d_now, 1), 'signal': ''}
-
-    # Bearish cross: K was above D, now below D
-    is_bearish_cross = (k_prev >= d_prev) and (k_now < d_now)
-    # Sweet spot: 50-80 (overbought zone tapi belum extreme)
-    is_in_sweet_spot = (k_now >= (100 - STOCH_ENTRY_MAX)) and (k_now <= (100 - STOCH_ENTRY_MIN))
-
-    if is_bearish_cross and is_in_sweet_spot:
-        details['signal'] = 'BEARISH_CROSS_SWEET_SPOT'
-        return True, details
-
-    return False, details
-
-
-def analyze_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
-    """
-    Kalimasada SHORT Strategy — Entry at Resistance/LH Trendline Pullback.
-    Mirror of analyze() for bearish markets.
-
-    Pipeline:
-    1. Calculate indicators
-    2. Detect pivot highs
-    3. Detect Lower Highs (LH trendline)
-    4. Check: is price NEAR resistance trendline?
-    5. Check: is volume rising?
-    6. Check: Stochastic bearish cross from high area
-    7. Calculate SL/TP (inverted)
-    """
-    if df is None or len(df) < 50:
+    if coin_df is None or btc_df is None:
+        return None
+    if len(coin_df) < lookback_days + 1 or len(btc_df) < lookback_days + 1:
         return None
 
-    try:
-        stoch_k, stoch_d = calc_stochastic(df, STOCH_K, STOCH_SMOOTH_K, STOCH_D)
-        vol_sma = calc_volume_sma(df, 20)
-        atr = calc_atr(df, 14)
+    # Coin return
+    coin_now = coin_df['close'].iloc[-1]
+    coin_old = coin_df['close'].iloc[-lookback_days - 1]
+    if coin_old <= 0:
+        return None
+    coin_return = ((coin_now - coin_old) / coin_old) * 100
 
-        p_highs = detect_pivot_highs(df)
-        p_lows = detect_pivot_lows(df)
+    # BTC return
+    btc_now = btc_df['close'].iloc[-1]
+    btc_old = btc_df['close'].iloc[-lookback_days - 1]
+    if btc_old <= 0:
+        return None
+    btc_return = ((btc_now - btc_old) / btc_old) * 100
 
-        if len(p_highs) < 2:
-            return None
+    return coin_return - btc_return
 
-        has_lh, lh_indices = detect_lower_highs(df, p_highs)
-        if not has_lh:
-            return None
 
-        # Resistance trendline
-        resistance_price = _calc_resistance_trendline(df, lh_indices)
-        current_price = df['close'].iloc[-1]
+def is_alpha_worthy(signal: Dict, coin_df: pd.DataFrame, btc_df: pd.DataFrame,
+                    d1_df: pd.DataFrame = None, weather: str = 'SIDEWAYS') -> Tuple[bool, List[str]]:
+    """
+    5-Layer Alpha Filter — Hanya loloskan sinyal yang benar-benar institutional grade.
 
-        near_resistance = False
-        if resistance_price and resistance_price > 0:
-            distance_pct = ((resistance_price - current_price) / resistance_price) * 100
-            near_resistance = (-0.5 <= distance_pct <= TRENDLINE_TOLERANCE_PCT)
+    Layer 1: Relative Strength vs BTC (coin harus outperform BTC 7d)
+    Layer 2: Volume Surge at Support (vol_at_support_score >= 1)
+    Layer 3: D1 Trend Confluence (D1 harus bullish/neutral)
+    Layer 4: Compression Quality (>25% range reduction)
+    Layer 5: Confidence Score (>= 65)
 
-        if not near_resistance:
-            return None
+    Returns:
+        (passed: bool, reasons: list of rejection reasons)
+    """
+    if not signal:
+        return False, ['NO_SIGNAL']
 
-        # Volume rising
-        if not _is_volume_rising(df):
-            return None
+    reasons = []
+    passed_layers = 0
+    total_layers = 5
 
-        # Stochastic bearish
-        stoch_ok, stoch_info = check_stochastic_short(stoch_k, stoch_d)
-        if not stoch_ok:
-            return None
+    # ── Layer 1: Relative Strength vs BTC ──
+    rs = calc_relative_strength(coin_df, btc_df, lookback_days=7)
+    if rs is not None:
+        if weather == 'DOWNTREND':
+            # Saat BTC bearish, koin HARUS decouple: RS > +3%
+            if rs > 3.0:
+                passed_layers += 1
+            else:
+                reasons.append(f'RS_WEAK_IN_DOWNTREND({rs:+.1f}%)')
+        elif weather == 'SIDEWAYS':
+            # Saat sideways, koin harus minimal tidak underperform: RS > -2%
+            if rs > -2.0:
+                passed_layers += 1
+            else:
+                reasons.append(f'RS_UNDERPERFORM({rs:+.1f}%)')
+        else:  # UPTREND
+            # Saat bullish, hampir semua koin OK, tapi filter yang sangat lemah
+            if rs > -5.0:
+                passed_layers += 1
+            else:
+                reasons.append(f'RS_LAGGARD({rs:+.1f}%)')
+    else:
+        passed_layers += 1  # No data = pass (benefit of doubt)
 
-        # Consolidation check
-        if not _is_consolidating(df, atr):
-            return None
+    # ── Layer 2: Volume Surge at Support (BONUS — bukan hard filter) ──
+    # Data backtest: trade tanpa volume score juga bisa WIN
+    # Volume di support = bonus confidence, bukan requirement
+    vol_score = signal.get('vol_at_support_score', 0)
+    if vol_score >= 1:
+        passed_layers += 1  # Bonus: ada volume institusi
+    else:
+        passed_layers += 1  # Tetap pass — volume bukan dealbreaker
+        # Tapi catat sebagai warning
+        if vol_score == 0:
+            reasons.append(f'NO_VOL_AT_SUPPORT(warn)')
 
-        # === SIGNAL — SHORT ===
-        entry_price = current_price
-        current_atr = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else entry_price * 0.02
+    # ── Layer 3: D1 Trend Confluence ──
+    if d1_df is not None and len(d1_df) > 25:
+        d1_close = d1_df['close'].iloc[-1]
+        d1_sma20 = d1_df['close'].rolling(20).mean().iloc[-1]
+        d1_ema50 = d1_df['close'].ewm(span=50, adjust=False).mean().iloc[-1]
 
-        atr_mult = ATR_SL_MULT.get(timeframe, ATR_SL_MULT_DEFAULT)
-        atr_sl_distance = current_atr * atr_mult
-
-        # SL ABOVE resistance, TP BELOW entry
-        if resistance_price:
-            resistance_sl = resistance_price * (1 + SL_BUFFER_PCT / 100)
-            sl_price = max(resistance_sl, entry_price + atr_sl_distance)
+        if not pd.isna(d1_sma20) and not pd.isna(d1_ema50):
+            # D1 harus tidak bearish: minimal harga di atas SMA20 ATAU EMA50
+            if d1_close > d1_sma20 or d1_close > d1_ema50:
+                passed_layers += 1
+            else:
+                reasons.append(f'D1_BEARISH(close<SMA20&EMA50)')
         else:
-            sl_price = entry_price + atr_sl_distance
+            passed_layers += 1  # No data = pass
+    else:
+        passed_layers += 1  # No D1 = pass
 
-        sl_distance = sl_price - entry_price
-        tp_price = entry_price - (sl_distance * DEFAULT_RR_RATIO)
+    # ── Layer 4: Triangle Freshness (BUKAN compression tinggi) ──
+    # DATA INSIGHT: Trade yang WIN punya compression RENDAH (2-6%)
+    # Trade yang LOSS punya compression TINGGI (30-56%)
+    # Compression tinggi = triangle sudah tua = terlambat masuk = BAHAYA
+    compression = signal.get('compression_pct', 0)
+    if compression < 40.0:
+        passed_layers += 1  # Fresh triangle, belum terlalu terkompresi
+    else:
+        reasons.append(f'STALE_TRIANGLE(comp={compression:.0f}%>40%)')
 
-        sl_pct = ((sl_price - entry_price) / entry_price) * 100
-        tp_pct = ((entry_price - tp_price) / entry_price) * 100
+    # ── Layer 5: Confidence Score ──
+    confidence = signal.get('confidence', 0)
+    if confidence >= 55:
+        passed_layers += 1
+    else:
+        reasons.append(f'LOW_CONFIDENCE({confidence}<55)')
 
-        signal = {
-            'symbol': symbol,
-            'timeframe': timeframe,
-            'signal_type': 'SHORT_RESISTANCE_PULLBACK',
-            'direction': 'SHORT',
-            'entry_price': round(entry_price, 8),
-            'sl_price': round(sl_price, 8),
-            'tp_price': round(tp_price, 8),
-            'sl_pct': round(sl_pct, 2),
-            'tp_pct': round(tp_pct, 2),
-            'rr_ratio': round(DEFAULT_RR_RATIO, 1),
-            'lower_highs': [round(df['high'].iloc[i], 6) for i in lh_indices],
-            'lh_touches': len(lh_indices),
-            'resistance_price': round(resistance_price, 8) if resistance_price else None,
-            'stoch_k': stoch_info.get('stoch_k', 0),
-            'stoch_d': stoch_info.get('stoch_d', 0),
-            'stoch_signal': stoch_info.get('signal', ''),
-            'atr': round(current_atr, 8),
-            'confidence': 50,
-        }
+    # KEPUTUSAN: Minimal 3 dari 5 layer harus pass
+    # Saat DOWNTREND: minimal 4 dari 5 (lebih ketat)
+    min_pass = 4 if weather == 'DOWNTREND' else 3
+    passed = passed_layers >= min_pass
 
-        log.info(f"🎯 SHORT SIGNAL: {symbol} {timeframe} | "
-                 f"Entry={entry_price:.6f} SL={sl_price:.6f} ({sl_pct:.1f}%) "
-                 f"TP={tp_price:.6f} ({tp_pct:.1f}%)")
-
-        return signal
-
-    except Exception as e:
-        log.error(f"Short strategy error for {symbol} {timeframe}: {e}")
-        return None
+    return passed, reasons

@@ -251,6 +251,75 @@ class MarketScanner:
 
         return result
 
+    def scan_top_volume(self) -> List[Dict]:
+        """
+        Scan top 60 coins by 24h volume — TANPA filter alpha/pump.
+        Ini meniru cara v6 backtest: scan SEMUA koin, biarkan analyze()
+        yang menentukan apakah ada ascending triangle pattern.
+        
+        Koin yang sudah pump TETAP bisa masuk (pucuk filter di main.py
+        yang akan handle), dan koin yang BELUM pump juga masuk —
+        ini yang penting karena ascending triangle terbentuk SEBELUM pump.
+        """
+        if not self._markets_loaded:
+            self.load_markets()
+
+        try:
+            tickers = self.exchange.fetch_tickers()
+        except Exception as e:
+            log.warning(f"Failed to fetch tickers for volume scan: {e}")
+            return []
+
+        candidates = []
+        for symbol, ticker in tickers.items():
+            if symbol not in self.markets_info:
+                continue
+            try:
+                vol_24h = float(ticker.get('quoteVolume', 0) or 0)
+                last_price = float(ticker.get('last', 0) or 0)
+                base = self.markets_info[symbol].get('base', symbol.split('/')[0])
+
+                if vol_24h < MIN_VOLUME_24H or last_price < MIN_PRICE:
+                    continue
+                if symbol in BLACKLIST_SYMBOLS:
+                    continue
+
+                bid = float(ticker.get('bid', 0) or 0)
+                ask = float(ticker.get('ask', 0) or 0)
+                spread_pct = ((ask - bid) / bid) * 100 if bid > 0 else 0
+                if spread_pct > MAX_SPREAD_PCT:
+                    continue
+
+                candidates.append({
+                    'symbol': symbol,
+                    'bybit_symbol': self.markets_info[symbol].get('id', symbol),
+                    'base': base,
+                    'price': last_price,
+                    'volume_24h': vol_24h,
+                    'pct_change_24h': float(ticker.get('percentage', 0) or 0),
+                    'spread_pct': round(spread_pct, 4),
+                    'market_info': self.markets_info[symbol],
+                    'alpha': 0.0,
+                    'is_volume_alpha': False,
+                    'is_decoupled': False,
+                    'is_new_listing': False,
+                    'correlation': 1.0,
+                    'vol_ratio': 1.0,
+                })
+            except (TypeError, ValueError):
+                continue
+
+        # Sort by volume descending — ambil top 60 (mirip v6 backtest 63 koin)
+        candidates.sort(key=lambda x: x['volume_24h'], reverse=True)
+        result = candidates[:60]
+
+        log.info(f"Volume scan: {len(candidates)} candidates → top {len(result)} by volume")
+        if result:
+            top3 = ', '.join([f"{c['base']}(${c['volume_24h']/1e6:.0f}M)" for c in result[:3]])
+            log.info(f"Top volume: {top3}")
+
+        return result
+
     def fetch_ohlcv(self, symbol: str, timeframe: str,
                     limit: int = CANDLE_LOOKBACK) -> Optional[pd.DataFrame]:
         """

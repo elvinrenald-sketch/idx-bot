@@ -233,13 +233,30 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                     log.info(f"Max positions ({MAX_OPEN_POSITIONS}) reached. Monitoring only.")
                     WEB.status = 'MAX_POSITIONS'
                 else:
-                    # ── Step 3: Scan for Alpha coins ────────────
+                    # ── Step 3: Scan Alpha + Volume coins (v6 style) ─
+                    # Alpha: koin yang sudah outperform BTC
+                    # Volume: top 60 by volume (mirip v6 backtest 63 koin)
+                    # Merge keduanya — ascending triangle bisa ada di kedua grup
                     alpha_coins = await asyncio.to_thread(scanner.scan_for_alpha)
-                    WEB.alpha_coins = alpha_coins
+                    volume_coins = await asyncio.to_thread(scanner.scan_top_volume)
 
-                    # ── Step 4: Deep analysis on Alpha coins ────
-                    signals = []
+                    # Deduplicate: gabung alpha + volume, prioritas alpha
+                    seen = set()
+                    all_coins = []
                     for coin in alpha_coins:
+                        seen.add(coin['bybit_symbol'])
+                        all_coins.append(coin)
+                    for coin in volume_coins:
+                        if coin['bybit_symbol'] not in seen:
+                            seen.add(coin['bybit_symbol'])
+                            all_coins.append(coin)
+
+                    WEB.alpha_coins = all_coins
+                    log.info(f"Combined scan: {len(alpha_coins)} alpha + {len(volume_coins)} vol → {len(all_coins)} unique coins")
+
+                    # ── Step 4: Deep analysis on ALL coins ─────────
+                    signals = []
+                    for coin in all_coins:
                         if coin['bybit_symbol'] in open_symbols:
                             continue  # Already have position
                         if coin['bybit_symbol'] in already_traded:

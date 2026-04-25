@@ -428,9 +428,9 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         slope_per_candle = (last_hl_price - first_hl_price) / candle_span
 
         # -- Step 3b: FLAT RESISTANCE (Atap Datar) --
-        # True Ascending Triangle HARUS punya Pivot High yang cluster di level yang sama
-        # Ini membedakan Ascending Triangle sejati dengan random uptrend biasa
-        FLAT_RESISTANCE_TOLERANCE = 3.0  # max 3% perbedaan antar Pivot High
+        # Ascending Triangle: Pivot High cluster di level yang HAMPIR sama
+        # Di real market, resistance tidak 100% flat — toleransi 5%
+        FLAT_RESISTANCE_TOLERANCE = 5.0  # max 5% perbedaan antar Pivot High
         flat_resistance_valid = False
         flat_resistance_level = None
 
@@ -467,25 +467,33 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             compression_pct = ((gap_first_to_resistance - gap_last_to_resistance) / gap_first_to_resistance) * 100
 
 
-        # -- Step 4: Demand Zone + Retest Count --
-        demand_zones = detect_demand_zones(df, lookback=200)
-        nearest_demand = None
-        demand_retest_count = 0
+        # -- Step 4: Resistance/Demand Retest Count --
+        # User's "demand zone" = flat resistance level di atas ascending triangle
+        # Seperti chart DASH: zona $36 yang terus di-retest dari bawah
+        # Hitung berapa kali harga menyentuh flat resistance ini
+        resistance_retest_count = 0
+        resistance_tolerance = flat_resistance_level * 0.015  # 1.5% tolerance
 
-        if demand_zones:
-            valid_demands = [dz for dz in demand_zones
-                            if dz['high'] <= current_price * 1.05]
-            if valid_demands:
-                nearest_demand = max(valid_demands, key=lambda x: x['high'])
+        for k in range(first_hl_idx, len(df)):
+            candle_high = df['high'].iloc[k]
+            candle_close = df['close'].iloc[k]
+            # Harga menyentuh zona resistance (dari bawah)
+            if candle_high >= flat_resistance_level - resistance_tolerance:
+                if candle_close <= flat_resistance_level * 1.01:  # Belum breakout
+                    resistance_retest_count += 1
 
-                dz_idx = nearest_demand['index']
-                dz_high = nearest_demand['high']
-
-                for k in range(dz_idx + 3, len(df)):
-                    candle_low = df['low'].iloc[k]
-                    candle_close = df['close'].iloc[k]
-                    if candle_low <= dz_high * 1.01 and candle_close > dz_high * 0.99:
-                        demand_retest_count += 1
+        # Deduplicate: hitung cluster (bukan setiap candle individual)
+        # Grup candle yang berdekatan dianggap 1 retest
+        retest_events = 0
+        in_zone = False
+        for k in range(first_hl_idx, len(df)):
+            candle_high = df['high'].iloc[k]
+            near_resistance = candle_high >= flat_resistance_level - resistance_tolerance
+            if near_resistance and not in_zone:
+                retest_events += 1
+                in_zone = True
+            elif not near_resistance:
+                in_zone = False
 
         # -- ALPHA: Volume Surge at Support --
         # Cek apakah volume meningkat di area pivot lows (tanda akumulasi institusi)
@@ -505,17 +513,19 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         trendline_price = _calc_trendline_value(df, hl_indices)
 
         # -- Step 6: ENTRY CONDITIONS --
-        # Entry A: HL ke-2+ trendline touch
+        # Entry A: HL ke-2+ trendline touch (pullback ke ascending trendline)
         near_trendline = False
         if trendline_price and trendline_price > 0 and len(hl_indices) >= 2:
             distance_pct = ((current_price - trendline_price) / trendline_price) * 100
-            near_trendline = (-1.0 <= distance_pct <= 2.0)
+            near_trendline = (-1.5 <= distance_pct <= 2.5)
 
-        # Entry B: Demand retest ke-3 (KETIGA kali retest = entry)
+        # Entry B: Flat resistance (demand zone) retest ke-3
+        # Seperti chart DASH: harga naik ke $36 untuk ke-3 kalinya = ENTRY
         near_demand_3x = False
-        if nearest_demand and demand_retest_count >= 3:
-            dz_distance = ((current_price - nearest_demand['mid']) / nearest_demand['mid']) * 100
-            near_demand_3x = (-1.0 <= dz_distance <= 3.0)
+        if retest_events >= 3 and len(hl_indices) >= 2:
+            resistance_distance = ((current_price - flat_resistance_level) / flat_resistance_level) * 100
+            # Harga harus DEKAT resistance (-3% sampai +0.5%)
+            near_demand_3x = (-3.0 <= resistance_distance <= 0.5)
 
         if not near_trendline and not near_demand_3x:
             return None
@@ -533,7 +543,7 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             c2 = df['close'].iloc[-3]
             c3 = df['close'].iloc[-4]
             if c0 > c1 > c2 > c3:
-                support_level = trendline_price if near_trendline else (nearest_demand['mid'] if nearest_demand else None)
+                support_level = trendline_price if near_trendline else last_hl_price
                 if support_level and ((c0 - support_level) / support_level * 100) > 1.5:
                     return None  # 4 candle naik berturut, bukan pullback
 
@@ -551,11 +561,10 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         if near_trendline and trendline_price:
             trendline_sl = trendline_price * (1 - SL_BUFFER_PCT / 100)
             sl_price = min(trendline_sl, entry_price - atr_sl_distance)
-        elif nearest_demand:
-            demand_sl = nearest_demand['low'] * (1 - SL_BUFFER_PCT / 100)
-            sl_price = min(demand_sl, entry_price - atr_sl_distance)
         else:
-            sl_price = entry_price - atr_sl_distance
+            # Entry B (demand/resistance retest): SL di bawah HL terakhir
+            last_hl_sl = last_hl_price * (1 - SL_BUFFER_PCT / 100)
+            sl_price = min(last_hl_sl, entry_price - atr_sl_distance)
 
         min_sl_pct = atr_mult / 100.0
         min_sl_floor = entry_price * min_sl_pct
@@ -569,7 +578,7 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         tp_pct = ((tp_price - entry_price) / entry_price) * 100
 
         accum = detect_accumulation_zone(df, p_highs, p_lows)
-        resistance = accum['resistance'] if accum else tp_price
+        resistance = flat_resistance_level
         support = trendline_price if trendline_price else sl_price
 
         hl_prices = [round(df['low'].iloc[i], 6) for i in hl_indices]
@@ -577,7 +586,7 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         if near_trendline:
             entry_type = 'HL_TRENDLINE_TOUCH'
         else:
-            entry_type = 'DEMAND_3X_RETEST'
+            entry_type = 'RESISTANCE_3X_RETEST'
 
         vol_sma = calc_volume_sma(df, 20)
 
@@ -596,8 +605,8 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             'support': round(support, 8),
             'higher_lows': hl_prices,
             'hl_touches': len(hl_indices),
-            'demand_zone': nearest_demand,
-            'demand_retest_count': demand_retest_count,
+            'flat_resistance': round(flat_resistance_level, 8),
+            'resistance_retest_count': retest_events,
             'trendline_price': round(trendline_price, 8) if trendline_price else None,
             'trendline_slope': round(slope_per_candle, 8),
             'total_rise_pct': round(total_rise, 1),
@@ -606,14 +615,14 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             'compression_pct': round(compression_pct, 1),
             'atr': round(current_atr, 8),
             'atr_pct': round((current_atr / entry_price) * 100, 2),
-            'confidence': min(100, 40 + len(hl_indices) * 15 + (10 if nearest_demand else 0) + min(demand_retest_count * 10, 30) + vol_at_support_score * 5),
+            'confidence': min(100, 40 + len(hl_indices) * 15 + min(retest_events * 10, 30) + vol_at_support_score * 5),
         }
 
         log.info(f"🎯 [{entry_type}]: {symbol} {timeframe} | "
                  f"Entry={entry_price:.6f} SL={sl_price:.6f} ({sl_pct:.1f}%) "
                  f"TP={tp_price:.6f} ({tp_pct:.1f}%) | "
-                 f"HL={len(hl_indices)} Slope={slope_per_candle:.6f} Rise={total_rise:.1f}% "
-                 f"DemandRetest={demand_retest_count}x")
+                 f"HL={len(hl_indices)} Resistance={flat_resistance_level:.4f} "
+                 f"Retests={retest_events}x Rise={total_rise:.1f}%")
 
         return signal
 

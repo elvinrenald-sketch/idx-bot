@@ -452,8 +452,8 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             return None  # Bukan Ascending Triangle sejati
 
         # Cek: harga sekarang HARUS di bawah resistance (belum breakout)
-        if current_price >= flat_resistance_level * 0.98:
-            return None  # Harga sudah di resistance atau sudah breakout = pucuk
+        if current_price >= flat_resistance_level * 1.005:
+            return None  # Harga sudah BREAKOUT di atas resistance
 
         # Cek: jarak HL ke Resistance semakin menyempit (kompresi aktif)
         gap_first_to_resistance = ((flat_resistance_level - first_hl_price) / flat_resistance_level) * 100
@@ -511,11 +511,11 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             distance_pct = ((current_price - trendline_price) / trendline_price) * 100
             near_trendline = (-1.0 <= distance_pct <= 2.0)
 
-        # Entry B: Demand 3x retest
+        # Entry B: Demand retest ke-3 (KETIGA kali retest = entry)
         near_demand_3x = False
-        if nearest_demand and demand_retest_count >= 2:
+        if nearest_demand and demand_retest_count >= 3:
             dz_distance = ((current_price - nearest_demand['mid']) / nearest_demand['mid']) * 100
-            near_demand_3x = (-1.0 <= dz_distance <= 2.0)
+            near_demand_3x = (-1.0 <= dz_distance <= 3.0)
 
         if not near_trendline and not near_demand_3x:
             return None

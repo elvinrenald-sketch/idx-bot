@@ -142,6 +142,8 @@ async def tg_signal(session: aiohttp.ClientSession, signal: Dict, sizing: Dict,
     entry = order_result.get('fill_price', signal['entry_price'])
     entry_type = signal.get('signal_type', 'LONG')
     entry_emoji = '📐' if 'TRENDLINE' in entry_type else '🏠'
+    retests = signal.get('resistance_retest_count', 0)
+    flat_res = signal.get('flat_resistance', 0)
     text = (
         f"🎯 <b>{entry_emoji} {entry_type}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -156,15 +158,14 @@ async def tg_signal(session: aiohttp.ClientSession, signal: Dict, sizing: Dict,
         f"💵 Margin: ${sizing['margin_required']:.2f}\n"
         f"🎲 Risk: ${sizing['risk_amount']:.4f} ({sizing['risk_pct']:.1f}%)\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 Vol: {signal['volume_ratio']}x avg\n"
-        f"📈 Stoch: {signal['stoch_k']:.0f}/{signal['stoch_d']:.0f} ({signal['stoch_signal']})\n"
-        f"🔺 HL: {signal['hl_touches']} touches\n"
-        f"⭐ Alpha: +{signal.get('alpha', 0):.1f}% vs BTC\n"
-        f"🧬 Decoupled: {'✅' if signal.get('is_decoupled') else '❌'} (Corr: {signal.get('correlation', 1)})\n"
-        f"🔥 Vol Alpha: {'✅' if signal.get('is_volume_alpha') else '❌'} ({signal.get('vol_ratio', 1)}x)\n"
-        f"🧠 Confidence: {signal['confidence']}/100"
+        f"📊 Vol: {signal.get('volume_ratio', 1.0)}x avg\n"
+        f"🔺 HL: {signal.get('hl_touches', 0)} touches\n"
+        f"🏔️ Resistance: {flat_res:.4f} | Retests: {retests}x\n"
+        f"📉 Rise: {signal.get('total_rise_pct', 0):.1f}%\n"
+        f"🧠 Confidence: {signal.get('confidence', 0)}/100"
     )
     await tg_send(session, text)
+
 
 
 async def tg_close(session: aiohttp.ClientSession, pos: Dict, reason: str):

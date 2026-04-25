@@ -233,91 +233,45 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                     log.info(f"Max positions ({MAX_OPEN_POSITIONS}) reached. Monitoring only.")
                     WEB.status = 'MAX_POSITIONS'
                 else:
-                    # ── Step 3: Scan Alpha + Volume coins (v6 style) ─
-                    # Alpha: koin yang sudah outperform BTC
-                    # Volume: top 60 by volume (mirip v6 backtest 63 koin)
-                    # Merge keduanya — ascending triangle bisa ada di kedua grup
-                    alpha_coins = await asyncio.to_thread(scanner.scan_for_alpha)
-                    volume_coins = await asyncio.to_thread(scanner.scan_top_volume)
-
-                    # Deduplicate: gabung alpha + volume, prioritas alpha
-                    seen = set()
-                    all_coins = []
-                    for coin in alpha_coins:
-                        seen.add(coin['bybit_symbol'])
-                        all_coins.append(coin)
-                    for coin in volume_coins:
-                        if coin['bybit_symbol'] not in seen:
-                            seen.add(coin['bybit_symbol'])
-                            all_coins.append(coin)
-
+                    # ── Step 3: Scan top 60 coins by volume (v6 PURE PA) ──
+                    # TANPA alpha filter, TANPA pucuk, TANPA weather
+                    # Sama persis seperti v6 backtest yang +254.7%
+                    all_coins = await asyncio.to_thread(scanner.scan_top_volume)
                     WEB.alpha_coins = all_coins
-                    log.info(f"Combined scan: {len(alpha_coins)} alpha + {len(volume_coins)} vol → {len(all_coins)} unique coins")
 
-                    # ── Step 4: Deep analysis on ALL coins ─────────
+                    # ── Step 4: Pure PA — analyze() ascending triangle ──
                     signals = []
                     for coin in all_coins:
                         if coin['bybit_symbol'] in open_symbols:
-                            continue  # Already have position
+                            continue
                         if coin['bybit_symbol'] in already_traded:
-                            continue  # Already traded this session
+                            continue
 
-                        # Fetch OHLCV for all timeframes
                         ohlcv_data = await asyncio.to_thread(
                             scanner.fetch_multi_timeframe, coin['symbol']
                         )
 
-                        # Run strategy on each timeframe
-                        for tf in TIMEFRAMES:
-                            df = ohlcv_data.get(tf)
-                            if df is None:
-                                continue
-
-                        # ── KALIMASADA v7 PURE PRICE ACTION ──
-                        # Strategy sekarang handle semuanya:
-                        # Flat Resistance + Ascending HL + Demand 3x + Pump Guard
-                        # Main cukup pre-filter pucuk di H4/D1 untuk efisiensi
+                        # PURE PRICE ACTION: analyze() handles everything
+                        # Ascending Triangle: Flat Resistance + Higher Lows
+                        # Entry: HL Trendline Touch / Demand 3x Retest
+                        # Internal guards: anti-pump candle, slope check
                         for tf in TIMEFRAMES:
                             df = ohlcv_data.get(tf)
                             if df is None or len(df) < 60:
                                 continue
+                            if tf == '15m':
+                                continue  # Skip M15, terlalu noisy
 
-                            # Skip M15 kecuali new listing
-                            if tf == '15m' and not coin.get('is_new_listing', False):
-                                continue
-
-                            # Pre-filter PUCUK cepat di D1/H4 sebelum analyze()
-                            d1_df = ohlcv_data.get('1d')
-                            h4_df = ohlcv_data.get('4h')
-
-                            if d1_df is not None and len(d1_df) > 20:
-                                if is_pucuk(d1_df):
-                                    log.info(f"🚫 PUCUK D1 REJECT {coin['base']} {tf}")
-                                    continue
-
-                            if h4_df is not None and len(h4_df) > 20 and tf in ('15m', '1h'):
-                                if is_pucuk(h4_df):
-                                    log.info(f"🚫 PUCUK H4 REJECT {coin['base']} {tf}")
-                                    continue
-
-                            # PURE PRICE ACTION — analyze() handles everything
                             signal = analyze(df, coin['symbol'], tf)
                             if signal:
-                                signal['alpha'] = coin['alpha']
                                 signal['bybit_symbol'] = coin['bybit_symbol']
                                 signal['volume_24h'] = coin['volume_24h']
                                 signal['market_info'] = coin['market_info']
-                                signal['is_volume_alpha'] = coin.get('is_volume_alpha', False)
-                                signal['is_decoupled'] = coin.get('is_decoupled', False)
-                                signal['is_new_listing'] = coin.get('is_new_listing', False)
-                                signal['correlation'] = coin.get('correlation', 1.0)
-                                signal['vol_ratio'] = coin.get('vol_ratio', 1.0)
-
                                 signals.append(signal)
-                                break  # 1 signal per koin cukup
+                                break
 
                         if len(signals) >= slots:
-                            break  # Enough signals
+                            break
 
                     WEB.signals_found = len(signals)
 

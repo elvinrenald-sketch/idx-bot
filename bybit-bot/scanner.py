@@ -12,7 +12,7 @@ from config import (
     TIMEFRAMES, CANDLE_LOOKBACK,
     STOCH_ENTRY_MIN, STOCH_ENTRY_MAX, SL_BUFFER_PCT, DEFAULT_RR_RATIO,
     ALPHA_THRESHOLD_PCT, ALPHA_LOOKBACK_H, ALPHA_CANDIDATE_LIMIT,
-    MAX_ALPHA_COINS, RATE_LIMIT_DELAY, MIN_VOLUME_24H, MIN_PRICE,
+    MAX_ALPHA_COINS, RATE_LIMIT_DELAY, MIN_VOLUME_24H, MAX_VOLUME_24H, MIN_PRICE,
     MAX_SPREAD_PCT, BLACKLIST_SYMBOLS, VOLUME_ALPHA_THRESHOLD,
     BTC_VOLUME_MAX_RATIO, DECOUPLING_THRESHOLD, DECOUPLING_WINDOW_H,
     NEW_LISTING_DAYS
@@ -145,8 +145,8 @@ class MarketScanner:
                 last_price = float(ticker.get('last', 0) or 0)
                 pct_change_24h = float(ticker.get('percentage', 0) or 0)
 
-                # Broad Filter: Min volume and Price
-                if vol_24h < MIN_VOLUME_24H or last_price < MIN_PRICE:
+                # Broad Filter: Min volume, Max volume (mid/small cap focus), and Price
+                if vol_24h < MIN_VOLUME_24H or vol_24h > MAX_VOLUME_24H or last_price < MIN_PRICE:
                     continue
                 
                 # Alpha proxy (24h) for initial sorting

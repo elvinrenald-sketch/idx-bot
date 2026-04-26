@@ -112,27 +112,35 @@ async def tg_poll_chat_id(session: aiohttp.ClientSession):
 async def tg_send_raw(session: aiohttp.ClientSession, chat_id: str, text: str):
     """Send to a specific chat_id directly."""
     if not TG_TOKEN or not chat_id:
+        log.warning(f"TG skip: token={bool(TG_TOKEN)} chat_id={bool(chat_id)}")
         return
     try:
         url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-        await session.post(url, json={
+        resp = await session.post(url, json={
             'chat_id': chat_id,
             'text': text,
             'parse_mode': 'HTML',
             'disable_web_page_preview': True,
         }, timeout=aiohttp.ClientTimeout(total=10))
+        resp_data = await resp.json()
+        if resp_data.get('ok'):
+            log.info(f"📨 Telegram sent OK to {chat_id}")
+        else:
+            log.error(f"📨 Telegram API error: {resp_data.get('description', resp_data)}")
     except Exception as e:
-        log.warning(f"Telegram send failed: {e}")
+        log.error(f"📨 Telegram send failed: {e}")
 
 
 async def tg_send(session: aiohttp.ClientSession, text: str):
     """Send message to Telegram (uses auto-detected or configured chat_id)."""
     if not TG_TOKEN:
+        log.warning("TG: No token configured")
         return
     chat_id = _active_chat_id
     if not chat_id:
-        log.debug("TG: No chat_id yet. Send /start to the bot first.")
+        log.warning("TG: No chat_id yet. Send /start to the bot first.")
         return
+    log.info(f"📨 TG sending to {chat_id}...")
     await tg_send_raw(session, chat_id, text)
 
 
@@ -188,6 +196,71 @@ async def tg_close(session: aiohttp.ClientSession, pos: Dict, reason: str):
 # ══════════════════════════════════════════════════════════════
 # MAIN SCAN LOOP
 # ══════════════════════════════════════════════════════════════
+async def sync_positions_from_bybit(executor: BybitExecutor, session):
+    """Sync open positions from Bybit into DB.
+    Catches 'orphaned' positions that were opened but not recorded
+    (e.g. due to crash after order but before DB insert).
+    """
+    try:
+        bybit_positions = await asyncio.to_thread(executor.get_all_positions)
+        db_open = db.get_open_positions()
+        db_symbols = {p['bybit_symbol'] for p in db_open}
+
+        synced = 0
+        for pos in bybit_positions:
+            symbol = pos['symbol']  # e.g. SOLUSDT
+            if symbol not in db_symbols:
+                # Orphaned position — register in DB
+                entry_price = pos['entry_price']
+                size = pos['size']
+                leverage = pos['leverage']
+                sl = pos['stop_loss']
+                tp = pos['take_profit']
+
+                # Convert SOLUSDT → SOL/USDT:USDT
+                base = symbol.replace('USDT', '')
+                ccxt_symbol = f"{base}/USDT:USDT"
+
+                margin = (entry_price * size) / leverage if leverage > 0 else 0
+
+                pos_id = db.open_position(
+                    symbol=ccxt_symbol,
+                    bybit_symbol=symbol,
+                    entry_price=entry_price,
+                    qty=size,
+                    leverage=leverage,
+                    sl_price=sl,
+                    tp_price=tp,
+                    margin_used=margin,
+                    timeframe='synced',
+                    alpha_pct=0,
+                    volume_ratio=1.0,
+                    signal_data=json.dumps({'synced': True, 'source': 'bybit_sync'}),
+                )
+                log.info(f"🔄 SYNCED orphan position: #{pos_id} {symbol} "
+                         f"@ {entry_price:.4f} qty={size} lev={leverage}x")
+
+                await tg_send(session,
+                    f"🔄 <b>POSITION SYNCED</b>\n"
+                    f"📊 {symbol} (dari Bybit)\n"
+                    f"💰 Entry: {entry_price:.4f}\n"
+                    f"🛑 SL: {sl:.4f}\n"
+                    f"🎯 TP: {tp:.4f}\n"
+                    f"📦 Qty: {size} | Lev: {leverage}x\n"
+                    f"ℹ️ Posisi ini sudah ada di Bybit tapi belum tercatat"
+                )
+                synced += 1
+
+        if synced > 0:
+            log.info(f"🔄 Synced {synced} orphaned positions from Bybit")
+        else:
+            log.info(f"🔄 Position sync: {len(bybit_positions)} on Bybit, "
+                     f"{len(db_open)} in DB — all matched")
+
+    except Exception as e:
+        log.error(f"Position sync error: {e}")
+
+
 async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
     """Main scanning loop — runs every SCAN_INTERVAL_SEC."""
     log.info("🚀 Scan loop started")
@@ -204,6 +277,13 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
             f"🎯 Strategy: Kalimasada v6 Ascending Triangle (LONG)\n"
             f"📅 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
         )
+
+        # Sync orphaned positions from Bybit
+        await sync_positions_from_bybit(executor, session)
+
+        # Mark all open positions as already traded
+        for p in db.get_open_positions():
+            already_traded.add(p['bybit_symbol'])
 
         while True:
             try:

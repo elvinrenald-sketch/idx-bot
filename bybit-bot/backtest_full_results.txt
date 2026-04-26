@@ -1,0 +1,253 @@
+/Users/oliveaprilia/Documents/workspace antigravity ai/bybit-bot/backtest.py:7: SyntaxWarning: invalid escape sequence '\ '
+  |        /\      /\
+=================================================================
+  KALIMASADA v6 - ASCENDING TRENDLINE + DEMAND 3X RETEST
+=================================================================
+   Entry A       : HL#2+ pada ascending trendline yang NAIK
+   Entry B       : Demand zone retest ke-3
+   Slope         : Trendline HARUS naik (slope positif)
+   Reject        : Koin sudah pump >20%
+   Periode       : Januari 2026 -> Hari ini
+   Modal Awal    : $3.50
+   Risk/Trade    : 3.0%
+   Leverage      : 10x
+   Uses          : strategy.py analyze() (SAME AS LIVE)
+=================================================================
+OK Terhubung ke GATE
+
+   Downloading 63 koin (Jan 2026 - today)...
+   [01/63] BTC/USDT           H1=999 H4=999 D1=294
+   [02/63] ETH/USDT           H1=999 H4=999 D1=294
+   [03/63] SOL/USDT           H1=999 H4=999 D1=294
+   [04/63] XRP/USDT           H1=999 H4=999 D1=294
+   [05/63] DOGE/USDT          H1=999 H4=999 D1=294
+   [06/63] ADA/USDT           H1=999 H4=999 D1=294
+   [07/63] AVAX/USDT          H1=999 H4=999 D1=294
+   [08/63] DOT/USDT           H1=999 H4=999 D1=294
+   [09/63] LINK/USDT          H1=999 H4=999 D1=294
+   [10/63] NEAR/USDT          H1=999 H4=999 D1=294
+   [11/63] SUI/USDT           H1=999 H4=999 D1=294
+   [12/63] APT/USDT           H1=999 H4=999 D1=294
+   [13/63] ARB/USDT           H1=999 H4=999 D1=294
+   [14/63] OP/USDT            H1=999 H4=999 D1=294
+   [15/63] FIL/USDT           H1=999 H4=999 D1=294
+   [16/63] LTC/USDT           H1=999 H4=999 D1=294
+   [17/63] BCH/USDT           H1=999 H4=999 D1=294
+   [18/63] UNI/USDT           H1=999 H4=999 D1=294
+   [19/63] AAVE/USDT          H1=999 H4=999 D1=294
+   [20/63] ATOM/USDT          H1=999 H4=999 D1=294
+   [21/63] ALGO/USDT          H1=999 H4=999 D1=294
+   [22/63] SAND/USDT          H1=999 H4=999 D1=294
+   [23/63] MANA/USDT          H1=999 H4=999 D1=294
+   [24/63] GALA/USDT          H1=999 H4=999 D1=294
+   [25/63] IMX/USDT           H1=999 H4=999 D1=294
+   [26/63] LDO/USDT           H1=999 H4=999 D1=294
+   [27/63] CRV/USDT           H1=999 H4=999 D1=294
+   [28/63] PEPE/USDT          H1=999 H4=999 D1=294
+   [29/63] WIF/USDT           H1=999 H4=999 D1=294
+   [30/63] BONK/USDT          H1=999 H4=999 D1=294
+   [31/63] FLOKI/USDT         H1=999 H4=999 D1=294
+   [32/63] SHIB/USDT          H1=999 H4=999 D1=294
+   [33/63] TIA/USDT           H1=999 H4=999 D1=294
+   [34/63] SEI/USDT           H1=999 H4=999 D1=294
+   [35/63] INJ/USDT           H1=999 H4=999 D1=294
+   [36/63] ONDO/USDT          H1=999 H4=999 D1=294
+   [37/63] PENDLE/USDT        H1=999 H4=999 D1=294
+   [38/63] RENDER/USDT        H1=999 H4=999 D1=294
+   [39/63] FET/USDT           H1=999 H4=999 D1=294
+   [40/63] JASMY/USDT         H1=999 H4=999 D1=294
+   [41/63] CHZ/USDT           H1=999 H4=999 D1=294
+   [42/63] COMP/USDT          H1=999 H4=999 D1=294
+   [43/63] SNX/USDT           H1=999 H4=999 D1=294
+   [44/63] BLUR/USDT          H1=999 H4=999 D1=294
+   [45/63] RUNE/USDT          H1=999 H4=999 D1=294
+   [46/63] ICP/USDT           H1=999 H4=999 D1=294
+   [47/63] HBAR/USDT          H1=999 H4=999 D1=294
+   [48/63] VET/USDT           H1=999 H4=999 D1=294
+   [49/63] TRX/USDT           H1=999 H4=999 D1=294
+   [50/63] ETC/USDT           H1=999 H4=999 D1=294
+   [51/63] TAO/USDT           H1=999 H4=999 D1=294
+   [52/63] WLD/USDT           H1=999 H4=999 D1=294
+   [53/63] STRK/USDT          H1=999 H4=999 D1=294
+   [54/63] ARKM/USDT          H1=999 H4=999 D1=294
+   [55/63] SUPER/USDT         H1=999 H4=999 D1=294
+   [56/63] CORE/USDT          H1=999 H4=999 D1=294
+   [57/63] KAS/USDT           H1=999 H4=999 D1=294
+   [58/63] FARTCOIN/USDT      H1=999 H4=999 D1=294
+   [59/63] BNB/USDT           H1=999 H4=999 D1=294
+   [60/63] POL/USDT           H1=999 H4=999 D1=294
+   [61/63] IP/USDT            H1=999 H4=999 D1=294
+   [62/63] DASH/USDT          H1=999 H4=999 D1=294
+   [63/63] ZEC/USDT           H1=999 H4=999 D1=294
+
+   63 koin siap.
+
+   Walk-forward v6 strategy...
+
+
+=================================================================
+  HASIL KALIMASADA v6 - ASCENDING TRENDLINE + DEMAND 3X
+=================================================================
+  Modal Awal       : $3.50
+  Modal Akhir      : $12.4141
+  Net Profit       : $8.9141 (+254.7%)
+  Max Drawdown     : 4.0%
+  Total Fees       : $0.1925
+  Profit Factor    : 7.35
+  ---
+  Total Trades     : 60
+  Win Rate         : 71.7%
+  ---
+  Signal Types:
+    HL_TRENDLINE_TOUCH : 54 (39W / 15L)
+    DEMAND_3X_RETEST   : 6 (4W / 2L)
+  ---
+  Filter Stats:
+    Scanned        : 18987
+    PUCUK rejected : 5415
+    No signal      : 10461
+  Avg WIN          : +$0.2399
+  Avg LOSS         : -$0.0825
+  Expected Value   : $0.1486/trade
+
+  VALIDASI:
+    ZEC trades     : 1 !! HARUS 0
+    DASH trades    : 1 OK found setup
+
+  Equity Curve:
+    01-01 $  3.5000 |||||||||||||||||||| START
+    01-10 $  3.5404 |||||||||||||||||||| WIN HL_TRENDLINE_TOUCH BTC/USDT H1
+    01-10 $  3.6254 |||||||||||||||||||| WIN HL_TRENDLINE_TOUCH ETH/USDT H4
+    01-10 $  3.7325 ||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH SOL/USDT H4
+    01-16 $  3.8386 ||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH XRP/USDT H4
+    01-28 $  3.8138 ||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH DOGE/USDT H1
+    01-10 $  3.9228 |||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH ADA/USDT H4
+    01-10 $  4.0425 ||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH AVAX/USDT H4
+    03-13 $  4.1499 ||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH DOT/USDT H4
+    01-10 $  4.2613 |||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH LINK/USDT H4
+    01-11 $  4.3815 ||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH NEAR/USDT H4
+    02-04 $  4.6242 |||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH SUI/USDT H4
+    01-10 $  4.7871 ||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH APT/USDT H4
+    01-10 $  4.9573 |||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH ARB/USDT H4
+    01-12 $  5.1298 ||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH OP/USDT H4
+    01-18 $  5.0967 ||||||||||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH FIL/USDT H1
+    01-10 $  5.0638 |||||||||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH LTC/USDT H1
+    01-12 $  5.0312 |||||||||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH BCH/USDT H1
+    01-04 $  4.9985 |||||||||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH UNI/USDT H1
+    01-16 $  5.1592 ||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH AAVE/USDT H4
+    01-23 $  5.3435 |||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH ATOM/USDT H4
+    02-09 $  5.3033 |||||||||||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH ALGO/USDT H1
+    01-11 $  5.2691 |||||||||||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH SAND/USDT H1
+    01-11 $  5.2287 ||||||||||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH MANA/USDT H1
+    01-11 $  5.4032 |||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH GALA/USDT H4
+    01-10 $  5.6270 |||||||||||||||||||||||||||||||| WIN DEMAND_3X_RETEST IMX/USDT H4
+    02-17 $  5.8283 ||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH LDO/USDT H4
+    01-11 $  5.7907 ||||||||||||||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH CRV/USDT H1
+    01-23 $  5.7401 |||||||||||||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH PEPE/USDT H1
+    01-12 $  5.9300 ||||||||||||||||||||||||||||||||| WIN DEMAND_3X_RETEST WIF/USDT H4
+    01-15 $  6.3249 |||||||||||||||||||||||||||||||||||| WIN DEMAND_3X_RETEST BONK/USDT H4
+    01-12 $  6.4990 ||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH FLOKI/USDT H4
+    01-24 $  6.6623 |||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH SHIB/USDT H4
+    01-12 $  6.9410 ||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH TIA/USDT H4
+    02-04 $  7.2811 ||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH SEI/USDT H4
+    01-10 $  7.5458 ||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH INJ/USDT H4
+    01-11 $  7.7102 |||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH ONDO/USDT H4
+    03-06 $  8.0090 ||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH PENDLE/USDT H4
+    02-04 $  8.4987 |||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH RENDER/USDT H4
+    02-04 $  8.9962 ||||||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH JASMY/USDT H4
+    02-18 $  8.8613 |||||||||||||||||||||||||||||||||||||||||||||||||| LOSS DEMAND_3X_RETEST CHZ/USDT H4
+    01-15 $  8.8041 |||||||||||||||||||||||||||||||||||||||||||||||||| LOSS DEMAND_3X_RETEST COMP/USDT H1
+    01-18 $  9.2044 |||||||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH SNX/USDT H4
+    01-11 $  9.5689 |||||||||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH BLUR/USDT H4
+    01-18 $  9.8168 |||||||||||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH RUNE/USDT H4
+    01-12 $ 10.1338 ||||||||||||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH ICP/USDT H4
+    01-09 $ 10.0377 ||||||||||||||||||||||||||||||||||||||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH HBAR/USDT H1
+    01-10 $  9.9730 |||||||||||||||||||||||||||||||||||||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH VET/USDT H1
+    01-10 $ 10.1181 ||||||||||||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH TRX/USDT H4
+    01-10 $ 10.3606 ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH ETC/USDT H4
+    02-03 $ 10.5114 |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH WLD/USDT H1
+    01-07 $ 10.3836 ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH STRK/USDT H1
+    01-16 $ 10.9351 |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH ARKM/USDT H4
+    01-24 $ 11.1497 |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH SUPER/USDT H1
+    01-11 $ 11.3946 |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH CORE/USDT H4
+    01-13 $ 11.7640 |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| WIN DEMAND_3X_RETEST KAS/USDT H4
+    01-12 $ 11.2901 |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH FARTCOIN/USDT H4
+    01-04 $ 11.4205 |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH BNB/USDT H1
+    01-23 $ 11.9678 |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH POL/USDT H4
+    03-06 $ 12.5036 |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| WIN HL_TRENDLINE_TOUCH DASH/USDT H4
+    01-05 $ 12.4141 |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| LOSS HL_TRENDLINE_TOUCH ZEC/USDT H1
+
+  Trade Log:
+    # Date     TF  Coin       Type                   W/L      Entry         SL         TP        PnL  Rise  HL DmR
+    1 01-10    H1  BTC        HL_TRENDLINE_TOUCH     W   $90587.7000 $88775.9460 $94211.2080    +$0.040  3.0%   4  18
+    2 01-10    H4  ETH        HL_TRENDLINE_TOUCH     W   $3086.6400 $2960.9204 $3338.0793    +$0.085  8.3%   2   1
+    3 01-10    H4  SOL        HL_TRENDLINE_TOUCH     W   $ 136.5900 $ 129.7596 $ 150.2507    +$0.107  8.1%   2  13
+    4 01-16    H4  XRP        HL_TRENDLINE_TOUCH     W   $   2.0740 $   1.9742 $   2.2736    +$0.106  7.7%   2  17
+    5 01-28    H1  DOGE       HL_TRENDLINE_TOUCH     L   $   0.1264 $   0.1238 $   0.1314    -$0.025  8.5%   4  19
+    6 01-10    H4  ADA        HL_TRENDLINE_TOUCH     W   $   0.3913 $   0.3724 $   0.4292    +$0.109 13.8%   2   1
+    7 01-10    H4  AVAX       HL_TRENDLINE_TOUCH     W   $  13.7000 $  12.9929 $  15.1143    +$0.120  9.1%   2   1
+    8 03-13    H4  DOT        HL_TRENDLINE_TOUCH     W   $   1.5080 $   1.4401 $   1.6437    +$0.107  9.0%   3   8
+    9 01-10    H4  LINK       HL_TRENDLINE_TOUCH     W   $  13.1300 $  12.5323 $  14.3254    +$0.111  9.3%   2   4
+   10 01-11    H4  NEAR       HL_TRENDLINE_TOUCH     W   $   1.7021 $   1.6208 $   1.8647    +$0.120  9.1%   2   4
+   11 02-04    H4  SUI        HL_TRENDLINE_TOUCH     W   $   1.0844 $   0.9835 $   1.2862    +$0.243 23.9%   3   1
+   12 01-10    H4  APT        HL_TRENDLINE_TOUCH     W   $   1.8086 $   1.7011 $   2.0236    +$0.163 13.7%   2   5
+   13 01-10    H4  ARB        HL_TRENDLINE_TOUCH     W   $   0.2059 $   0.1935 $   0.2306    +$0.170 11.8%   2   1
+   14 01-12    H4  OP         HL_TRENDLINE_TOUCH     W   $   0.3143 $   0.2958 $   0.3512    +$0.173  9.5%   3   6
+   15 01-18    H1  FIL        HL_TRENDLINE_TOUCH     L   $   1.5380 $   1.5072 $   1.5995    -$0.033  9.4%   4   4
+   16 01-10    H1  LTC        HL_TRENDLINE_TOUCH     L   $  81.4000 $  79.7720 $  84.6560    -$0.033  3.2%   3  27
+   17 01-12    H1  BCH        HL_TRENDLINE_TOUCH     L   $ 647.5300 $ 634.5794 $ 673.4312    -$0.033  6.3%   5  65
+   18 01-04    H1  UNI        HL_TRENDLINE_TOUCH     L   $   5.9030 $   5.7843 $   6.1404    -$0.033  7.2%   5   4
+   19 01-16    H4  AAVE       HL_TRENDLINE_TOUCH     W   $ 172.9200 $ 163.5271 $ 191.7057    +$0.161 12.0%   2   3
+   20 01-23    H4  ATOM       HL_TRENDLINE_TOUCH     W   $   2.3760 $   2.2328 $   2.6624    +$0.184 14.1%   3  15
+   21 02-09    H1  ALGO       HL_TRENDLINE_TOUCH     L   $   0.0958 $   0.0936 $   0.1003    -$0.040  4.8%   4  13
+   22 01-11    H1  SAND       HL_TRENDLINE_TOUCH     L   $   0.1192 $   0.1168 $   0.1240    -$0.034  5.0%   5  16
+   23 01-11    H1  MANA       HL_TRENDLINE_TOUCH     L   $   0.1458 $   0.1423 $   0.1528    -$0.040 10.8%   4   3
+   24 01-11    H4  GALA       HL_TRENDLINE_TOUCH     W   $   0.0071 $   0.0067 $   0.0079    +$0.174 13.1%   2   4
+   25 01-10    H4  IMX        DEMAND_3X_RETEST       W   $   0.2690 $   0.2502 $   0.3065    +$0.224 13.4%   2   3
+   26 02-17    H4  LDO        HL_TRENDLINE_TOUCH     W   $   0.3434 $   0.3227 $   0.3849    +$0.201 14.4%   3   2
+   27 01-11    H1  CRV        HL_TRENDLINE_TOUCH     L   $   0.4079 $   0.3997 $   0.4242    -$0.038  4.5%   4  22
+   28 01-23    H1  PEPE       HL_TRENDLINE_TOUCH     L   $   0.0000 $   0.0000 $   0.0000    -$0.051  6.7%   4  17
+   29 01-12    H4  WIF        DEMAND_3X_RETEST       W   $   0.3848 $   0.3633 $   0.4278    +$0.190 14.7%   2  14
+   30 01-15    H4  BONK       DEMAND_3X_RETEST       W   $   0.0000 $   0.0000 $   0.0000    +$0.395 17.5%   2  11
+   31 01-12    H4  FLOKI      HL_TRENDLINE_TOUCH     W   $   0.0001 $   0.0000 $   0.0001    +$0.174 15.0%   2   0
+   32 01-24    H4  SHIB       HL_TRENDLINE_TOUCH     W   $   0.0000 $   0.0000 $   0.0000    +$0.163  9.7%   3   1
+   33 01-12    H4  TIA        HL_TRENDLINE_TOUCH     W   $   0.5449 $   0.5065 $   0.6217    +$0.279 13.2%   2   3
+   34 02-04    H4  SEI        HL_TRENDLINE_TOUCH     W   $   0.0841 $   0.0772 $   0.0980    +$0.340 20.4%   3  11
+   35 01-10    H4  INJ        HL_TRENDLINE_TOUCH     W   $   5.1930 $   4.8744 $   5.8301    +$0.265 18.0%   2   1
+   36 01-11    H4  ONDO       HL_TRENDLINE_TOUCH     W   $   0.4020 $   0.3871 $   0.4318    +$0.164 18.4%   2  11
+   37 03-06    H4  PENDLE     HL_TRENDLINE_TOUCH     W   $   1.2760 $   1.1926 $   1.4428    +$0.299 15.4%   4   5
+   38 02-04    H4  RENDER     HL_TRENDLINE_TOUCH     W   $   1.4969 $   1.3433 $   1.8042    +$0.490 24.9%   3   0
+   39 02-04    H4  JASMY      HL_TRENDLINE_TOUCH     W   $   0.0059 $   0.0053 $   0.0070    +$0.498 24.7%   3   2
+   40 02-18    H4  CHZ        DEMAND_3X_RETEST       L   $   0.0409 $   0.0390 $   0.0449    -$0.135 17.1%   3  10
+   41 01-15    H1  COMP       DEMAND_3X_RETEST       L   $  27.0200 $  26.4796 $  28.1008    -$0.057  8.9%   5   4
+   42 01-18    H4  SNX        HL_TRENDLINE_TOUCH     W   $   0.4550 $   0.4202 $   0.5246    +$0.400 14.8%   2  21
+   43 01-11    H4  BLUR       HL_TRENDLINE_TOUCH     W   $   0.0319 $   0.0298 $   0.0362    +$0.365  8.9%   2  12
+   44 01-18    H4  RUNE       HL_TRENDLINE_TOUCH     W   $   0.6659 $   0.6367 $   0.7244    +$0.248 21.9%   3   1
+   45 01-12    H4  ICP        HL_TRENDLINE_TOUCH     W   $   3.1420 $   2.9706 $   3.4849    +$0.317 10.4%   2   3
+   46 01-09    H1  HBAR       HL_TRENDLINE_TOUCH     L   $   0.1191 $   0.1155 $   0.1262    -$0.096  4.8%   3  13
+   47 01-10    H1  VET        HL_TRENDLINE_TOUCH     L   $   0.0118 $   0.0116 $   0.0123    -$0.065  5.3%   5   4
+   48 01-10    H4  TRX        HL_TRENDLINE_TOUCH     W   $   0.2979 $   0.2904 $   0.3128    +$0.145  3.0%   2  14
+   49 01-10    H4  ETC        HL_TRENDLINE_TOUCH     W   $  12.6770 $  12.1611 $  13.7088    +$0.243  9.8%   2   4
+   50 02-03    H1  WLD        HL_TRENDLINE_TOUCH     W   $   0.4056 $   0.3955 $   0.4259    +$0.151  7.8%   4  24
+   51 01-07    H1  STRK       HL_TRENDLINE_TOUCH     L   $   0.0906 $   0.0871 $   0.0977    -$0.128 17.6%   5   6
+   52 01-16    H4  ARKM       HL_TRENDLINE_TOUCH     W   $   0.2046 $   0.1863 $   0.2411    +$0.552 17.8%   2   9
+   53 01-24    H1  SUPER      HL_TRENDLINE_TOUCH     W   $   0.1956 $   0.1891 $   0.2087    +$0.215 11.3%   4  18
+   54 01-11    H4  CORE       HL_TRENDLINE_TOUCH     W   $   0.1243 $   0.1197 $   0.1336    +$0.245 12.5%   2   1
+   55 01-13    H4  KAS        DEMAND_3X_RETEST       W   $   0.0468 $   0.0442 $   0.0519    +$0.369  7.4%   3   7
+   56 01-12    H4  FARTCOIN   HL_TRENDLINE_TOUCH     L   $   0.3661 $   0.3175 $   0.4633    -$0.474 19.7%   2  11
+   57 01-04    H1  BNB        HL_TRENDLINE_TOUCH     W   $ 885.9000 $ 868.1820 $ 921.3360    +$0.130  4.1%   5   3
+   58 01-23    H4  POL        HL_TRENDLINE_TOUCH     W   $   0.1300 $   0.1195 $   0.1509    +$0.547 15.2%   3  10
+   59 03-06    H4  DASH       HL_TRENDLINE_TOUCH     W   $  34.4000 $  31.8071 $  39.5857    +$0.536 18.6%   4   4
+   60 01-05    H1  ZEC        HL_TRENDLINE_TOUCH     L   $ 505.5700 $ 494.2614 $ 528.1871    -$0.090  7.5%   3   0
+
+=================================================================
+  PERBANDINGAN:
+  Strategi                                 WR     Net%   MaxDD
+  ____________________________________ ______ ________ _______
+  v1 Pullback                           36.4%   -23.2%   64.6%
+  v2 Ketat                               0.0%   -15.0%   15.0%
+  v3 Bidirectional                      18.2%   -60.9%   60.9%
+  v4 Momentum EMA                       36.1%   -24.7%   69.8%
+  v5 Ascending Triangle (Mar-Apr)        0.0%    -2.6%    2.6%
+  v6 HL Trendline+Demand3x (Jan-Apr)    71.7%  +254.7%    4.0%
+=================================================================

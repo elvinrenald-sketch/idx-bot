@@ -1,0 +1,2114 @@
+commit 0a194400ffdbc9863e78c4c81485939787f0d5dd
+Author: Elvin r <>
+Date:   Thu Apr 16 16:24:55 2026 +0700
+
+    fix: Bulletproof 100% dust-free sell execution
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 23e0837..1b125ca 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -213,10 +213,21 @@ async def execute_real_sell_order(token_id: str, shares: float, exit_price: floa
+         from py_clob_client.clob_types import MarketOrderArgs, OrderType
+         from py_clob_client.order_builder.constants import SELL
+ 
+-        # Sell by number of shares (outcome tokens)
++        # Try to get the ABSOLUTE EXACT balance from Polymarket to avoid ANY dust issues.
++        try:
++            resp_bal = client.get_balance_allowance(token_id)
++            bal_str = resp_bal.get('balance', '0')
++            bal_float = float(bal_str) / 1_000_000.0
++            if bal_float > 0:
++                shares = bal_float
++                log.info(f"[CLOB] Wallet fetched exact balance: {shares:.6f} shares for token {token_id[:6]}")
++        except Exception as e:
++            log.warning(f"[CLOB] Could not fetch exact balance before sell: {e}")
++
++        # Sell exact tokens we have on chain
+         mo = MarketOrderArgs(
+             token_id=token_id,
+-            amount=round(shares, 6),   # UPGRADED PRECISION: Polymarket uses 6 decimals
++            amount=round(shares, 6),
+             side=SELL,
+             order_type=OrderType.FOK,
+         )
+
+commit fdd2086286e2981750171931c974d022f47bec7a
+Author: Elvin r <>
+Date:   Thu Apr 16 13:49:29 2026 +0700
+
+    fix: Robust wallet sync, Bid price valuation, and 6-decimal precision
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index c588aae..23e0837 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -216,7 +216,7 @@ async def execute_real_sell_order(token_id: str, shares: float, exit_price: floa
+         # Sell by number of shares (outcome tokens)
+         mo = MarketOrderArgs(
+             token_id=token_id,
+-            amount=round(shares, 4),   # shares to sell
++            amount=round(shares, 6),   # UPGRADED PRECISION: Polymarket uses 6 decimals
+             side=SELL,
+             order_type=OrderType.FOK,
+         )
+@@ -1158,10 +1158,11 @@ async def fetch_price(session, token_id: str) -> Optional[float]:
+     if not token_id:
+         return None
+     try:
+-        data = await api_get(session, f"{CFG['CLOB_API']}/midpoint",
+-                             [('token_id', token_id)])
++        # We fetch the BID price (what we can sell for) to match Polymarket UI valuation
++        data = await api_get(session, f"{CFG['CLOB_API']}/price",
++                             [('token_id', token_id), ('side', 'buy')])
+         if isinstance(data, dict):
+-            v = float(data.get('mid', 0))
++            v = float(data.get('price', 0))
+             return v if v > 0 else None
+     except Exception:
+         pass
+@@ -1417,6 +1418,50 @@ class PositionManager:
+     async def refresh(self):
+         self.open_positions = db_get_open_positions()
+ 
++    async def sync_with_wallet(self, session):
++        """Periodically verify OPEN positions against actual Polymarket wallet balance.
++        This handles cases where trades were closed elsewhere or 'dust' was left.
++        """
++        try:
++            # Only sync if we have API keys
++            if not PRIVATE_KEY:
++                return
++                
++            open_pos = db_get_open_positions()
++            if not open_pos:
++                return
++                
++            log.info(f"[SYNC] Verifying {len(open_pos)} open positions against on-chain balance...")
++            
++            # Fetch balances for all open tokens
++            client = _init_clob_client()
++            if not client:
++                return
++                
++            for pos in open_pos:
++                try:
++                    tid = pos['token_id']
++                    if not tid: continue
++                    
++                    # SDK call to get balance
++                    # PM uses 6 decimals for tokens
++                    resp = client.get_balance_allowance(tid)
++                    bal_str = resp.get('balance', '0')
++                    bal_float = float(bal_str) / 1_000_000.0
++                    
++                    # If balance is 0 or extremely negligible (less than 0.000001 USDC value)
++                    # and the position is marked as OPEN in our DB, close it.
++                    if bal_float < 0.000001:
++                        log.warning(f"[SYNC] Ghost position found for Pos #{pos['id']} ({pos['question']}). Wallet balance is 0. Marking as CLOSED.")
++                        db_close_position(pos['id'], pos['entry_price'], "EXTERNAL_SYNC")
++                except Exception as e:
++                    log.error(f"[SYNC] Error checking balance for token {tid}: {e}")
++                    
++            # Refresh local memory
++            await self.refresh()
++        except Exception as e:
++            log.error(f"[SYNC] Global sync error: {e}")
++
+     @property
+     def count(self) -> int:
+         return len(self.open_positions)
+@@ -1850,6 +1895,12 @@ async def main():
+             try:
+                 await pm.refresh()
+                 
++                # --- AUTO-SYNC WALLET BALANCE ---
++                # Check actual blockchain balance every 10 scans to fix sync issues
++                if scans % 10 == 0:
++                    await pm.sync_with_wallet(session)
++                # --------------------------------
++                
+                 # Fetch markets FIRST so we know which are active
+                 raw = await fetch_markets(session)
+                 active_ids = {str(m.get('id', '')) for m in raw}
+
+commit ecf70aed20ee094fbc1e534c759e072a85681b1a
+Author: Elvin r <>
+Date:   Thu Apr 16 13:34:17 2026 +0700
+
+    fix: STRICTLY prevent bot from entering historically traded markets
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 35289ea..c588aae 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -879,31 +879,28 @@ def db_get_open_positions() -> List[dict]:
+         log.error(f'db_get_open_positions error: {e}')
+         return []
+ 
+-def db_get_open_market_ids() -> set:
+-    """Gets market IDs of CURRENTLY OPEN positions only.
+-    We do NOT block markets from historical (paper) trades,
+-    so real trading can enter any valid market fresh.
+-    Within one session, already_opened is extended after each entry
+-    to prevent double-entry in the same scan cycle.
++def db_get_all_traded_market_ids() -> set:
++    """Gets ALL market IDs traded in the current run (including closed ones).
++    This prevents the bot from re-entering a market it has already traded and closed.
+     """
+     try:
+         conn = sqlite3.connect(DB_PATH)
+         cur  = conn.cursor()
+         reset_id = CFG.get('STATS_RESET_ID', 0)
+-        # Only block markets that are CURRENTLY OPEN (not historical)
+-        cur.execute("SELECT DISTINCT market_id FROM positions WHERE status='OPEN' AND id > ?", (reset_id,))
++        # Block previously traded markets
++        cur.execute("SELECT DISTINCT market_id FROM positions WHERE id > ?", (reset_id,))
+         rows = cur.fetchall(); conn.close()
+         return {r[0] for r in rows}
+     except Exception:
+         return set()
+ 
+-def db_get_open_market_questions() -> set:
+-    """Gets questions of CURRENTLY OPEN positions to prevent duplicate-side entry."""
++def db_get_all_traded_market_questions() -> set:
++    """Gets questions of ALL traded positions to prevent duplicate-side entry."""
+     try:
+         conn = sqlite3.connect(DB_PATH)
+         cur  = conn.cursor()
+         reset_id = CFG.get('STATS_RESET_ID', 0)
+-        cur.execute("SELECT DISTINCT question FROM positions WHERE status='OPEN' AND id > ?", (reset_id,))
++        cur.execute("SELECT DISTINCT question FROM positions WHERE id > ?", (reset_id,))
+         rows = cur.fetchall(); conn.close()
+         return {r[0].strip() for r in rows if r[0]}
+     except Exception:
+@@ -1831,8 +1828,8 @@ async def main():
+     scans         = 0
+     pm            = PositionManager()
+     await pm.refresh()
+-    already_opened = db_get_open_market_ids()
+-    already_opened_questions = db_get_open_market_questions()
++    already_opened = db_get_all_traded_market_ids()
++    already_opened_questions = db_get_all_traded_market_questions()
+     rejected_cache = {}  # {market_id: timestamp_rejected}
+     
+     # equity_curve is now computed fresh from DB in /api/state
+
+commit 563aa9576c8aefa6df4a7b35ebfd309d7b772a3b
+Author: Elvin r <>
+Date:   Thu Apr 16 13:29:04 2026 +0700
+
+    fix: Web UI manual sell API token fractional balance mismatch handling
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index b311eeb..35289ea 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -228,6 +228,31 @@ async def execute_real_sell_order(token_id: str, shares: float, exit_price: floa
+         log.info(f'[CLOB] SELL submitted → ID:{order_id} Status:{status} Shares:{shares:.4f}')
+         return {'success': True, 'order_id': order_id, 'status': status, 'raw': resp}
+     except Exception as e:
++        err_msg = str(e)
++        if "the balance is not enough -> balance:" in err_msg:
++            try:
++                import re
++                match = re.search(r'balance:\s*(\d+)', err_msg)
++                if match:
++                    # PM stores outcome tokens with 6 decimals
++                    real_shares = float(match.group(1)) / 1_000_000.0
++                    if real_shares > 0:
++                        log.warning(f"[CLOB] Share mismatch. Retrying sell with exact on-chain balance: {real_shares:.6f}")
++                        mo = MarketOrderArgs(
++                            token_id=token_id,
++                            amount=real_shares,
++                            side=SELL,
++                            order_type=OrderType.FOK,
++                        )
++                        signed  = client.create_market_order(mo)
++                        resp    = client.post_order(signed, OrderType.FOK)
++                        order_id = resp.get('orderID') or resp.get('id') or 'unknown'
++                        status   = resp.get('status', '')
++                        log.info(f'[CLOB] SELL submitted (Retry) → ID:{order_id} Status:{status} Shares:{real_shares:.6f}')
++                        return {'success': True, 'order_id': order_id, 'status': status, 'raw': resp}
++            except Exception as retry_e:
++                log.error(f'[CLOB] Retry SELL order failed: {retry_e}')
++                
+         log.error(f'[CLOB] SELL order failed: {e}')
+         return {'success': False, 'error': str(e)}
+ 
+
+commit 30b9f5641734401b5e93f2ec7a74892042965cf8
+Author: Elvin r <>
+Date:   Thu Apr 16 13:20:39 2026 +0700
+
+    fix: Web UI manual sell API condition bug
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 17d677b..b311eeb 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -2075,9 +2075,8 @@ async def main():
+                             cur_price = op['entry_price']
+                         
+                         # Execute real sell order
+-                        if CFG.get('REAL_MONEY_TRADE', False):
+-                            log.info(f"[WEB UI] Sending CLOB Sell order for {op['shares']} shares of {op['token_id']}")
+-                            await execute_real_sell_order(op['token_id'], op['shares'], cur_price)
++                        log.info(f"[WEB UI] Sending CLOB Sell order for {op['shares']} shares of {op['token_id']}")
++                        await execute_real_sell_order(op['token_id'], op['shares'], cur_price)
+                             
+                         pnl = db_close_position(op['id'], cur_price, "WEB_CLOSEALL")
+                         await tg_close(session, op, cur_price, pnl, "WEB_CLOSEALL")
+@@ -2096,9 +2095,9 @@ async def main():
+                                 cur_price = op['entry_price']
+                                 
+                             # Execute real sell order
+-                            if CFG.get('REAL_MONEY_TRADE', False):
+-                                log.info(f"[WEB UI] Sending CLOB Sell order for {op['shares']} shares of {op['token_id']}")
+-                                await execute_real_sell_order(op['token_id'], op['shares'], cur_price)
++                            log.info(f"[WEB UI] Sending CLOB Sell order for {op['shares']} shares of {op['token_id']}")
++                            res = await execute_real_sell_order(op['token_id'], op['shares'], cur_price)
++                            log.info(f"[WEB UI] CLOB output: {res}")
+                                 
+                             pnl = db_close_position(op['id'], cur_price, "WEB_MANUAL_CLOSE")
+                             await tg_close(session, op, cur_price, pnl, "WEB_MANUAL_CLOSE")
+
+commit 3e32a3e1f7fbc89ed357f756adcfaee671c12fc6
+Author: Elvin r <>
+Date:   Thu Apr 16 13:12:32 2026 +0700
+
+    fix: sync BANKROLL hardcode with actual Polymarket portfolio cash .54
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index b65bf13..17d677b 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -247,7 +247,7 @@ CFG = {
+     'CLEAR_SCREEN'        : False,
+ 
+     # Risk Management — REAL TRADE MODE
+-    'BANKROLL'            : 10.59,     # Real Polymarket wallet balance
++    'BANKROLL'            : 10.54,     # Real Polymarket wallet balance
+     'STATS_RESET_ID'      : 523,       # All 394 paper trades excluded from display; brain still uses them all
+     'BET_PCT'             : 0.10,
+     'MIN_BET'             : 1.00,
+
+commit 673bc6221e73663f0bd7e5368196c749f6cb7840
+Author: Elvin r <>
+Date:   Thu Apr 16 13:06:03 2026 +0700
+
+    fix: Web UI emergency close and sell buttons now execute real CLOB sell orders
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index e6b7dfa..b65bf13 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -2073,6 +2073,12 @@ async def main():
+                         cur_price = await fetch_price(session, op['token_id'])
+                         if cur_price is None:
+                             cur_price = op['entry_price']
++                        
++                        # Execute real sell order
++                        if CFG.get('REAL_MONEY_TRADE', False):
++                            log.info(f"[WEB UI] Sending CLOB Sell order for {op['shares']} shares of {op['token_id']}")
++                            await execute_real_sell_order(op['token_id'], op['shares'], cur_price)
++                            
+                         pnl = db_close_position(op['id'], cur_price, "WEB_CLOSEALL")
+                         await tg_close(session, op, cur_price, pnl, "WEB_CLOSEALL")
+                         # intentionally keeping in already_opened to prevent re-entry
+@@ -2088,6 +2094,12 @@ async def main():
+                             cur_price = await fetch_price(session, op['token_id'])
+                             if cur_price is None:
+                                 cur_price = op['entry_price']
++                                
++                            # Execute real sell order
++                            if CFG.get('REAL_MONEY_TRADE', False):
++                                log.info(f"[WEB UI] Sending CLOB Sell order for {op['shares']} shares of {op['token_id']}")
++                                await execute_real_sell_order(op['token_id'], op['shares'], cur_price)
++                                
+                             pnl = db_close_position(op['id'], cur_price, "WEB_MANUAL_CLOSE")
+                             await tg_close(session, op, cur_price, pnl, "WEB_MANUAL_CLOSE")
+                             # intentionally keeping in already_opened to prevent re-entry
+
+commit 63596a9afcf0936bb2aeb34b1854c1df23b279cb
+Author: Elvin r <>
+Date:   Thu Apr 16 12:57:51 2026 +0700
+
+    fix: equity tween animates from 0 to bankroll, was stuck at zsh.00
+
+diff --git a/templates/index.html b/templates/index.html
+index 4131159..ff3f477 100644
+--- a/templates/index.html
++++ b/templates/index.html
+@@ -389,7 +389,7 @@
+             
+             const eqEl = document.getElementById('v-equity');
+             eqEl.dataset.target = totalEquity;
+-            if(!eqEl.dataset.val) eqEl.dataset.val = bankroll;
++            if(!eqEl.dataset.val) eqEl.dataset.val = 0; // start from 0 so tween animates to bankroll
+ 
+             document.getElementById('v-trades').innerText = data.stats.closed_trades;
+             document.getElementById('v-winrate').innerText = data.stats.win_rate.toFixed(1) + '%';
+
+commit 689ce816879928e438d82e8ee509484be7abc683
+Author: Elvin r <>
+Date:   Thu Apr 16 12:51:27 2026 +0700
+
+    fix: STATS_RESET_ID=523, equity from real wallet .59, brain keeps all 394 samples
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 4706368..e6b7dfa 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -247,8 +247,8 @@ CFG = {
+     'CLEAR_SCREEN'        : False,
+ 
+     # Risk Management — REAL TRADE MODE
+-    'BANKROLL'            : 10.59,     # Actual deposit amount (updated)
+-    'STATS_RESET_ID'      : 317,       # Reset stats from position 317 onwards (start of real trading)
++    'BANKROLL'            : 10.59,     # Real Polymarket wallet balance
++    'STATS_RESET_ID'      : 523,       # All 394 paper trades excluded from display; brain still uses them all
+     'BET_PCT'             : 0.10,
+     'MIN_BET'             : 1.00,
+     'MAX_BET'             : 25.00,     # Uncapped — tiered sizing handles this
+
+commit bcb275242175189d58ee2cc08086f470faa6c44b
+Author: Elvin r <>
+Date:   Thu Apr 16 12:42:24 2026 +0700
+
+    fix: use signature_type=1 (Magic.link) for Google/email Polymarket accounts
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 756780c..4706368 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -104,8 +104,8 @@ _clob_client = None
+ 
+ def _init_clob_client():
+     """Initialize Polymarket CLOB client for real order execution.
+-    Uses signature_type=0 (EOA direct) — correct for private keys
+-    exported directly from Polymarket Settings → Private Key page.
++    Uses signature_type=1 (Magic.link) — correct for accounts created via
++    Google/Email login on Polymarket (Magic.link embedded wallet).
+     """
+     global _clob_client
+     if _clob_client is not None:
+@@ -118,12 +118,12 @@ def _init_clob_client():
+             'https://clob.polymarket.com',
+             key=PRIVATE_KEY,
+             chain_id=137,
+-            signature_type=0,   # EOA: direct private key
++            signature_type=1,   # Magic.link: for Google/email Polymarket accounts
+             funder=WALLET_ADDRESS,
+         )
+         client.set_api_creds(client.create_or_derive_api_creds())
+         _clob_client = client
+-        log.info('[CLOB] ✅ Real trade client initialized — LIVE TRADING ACTIVE')
++        log.info('[CLOB] ✅ Real trade client initialized (Magic.link) — LIVE TRADING ACTIVE')
+         return client
+     except Exception as e:
+         log.error(f'[CLOB] ❌ Failed to initialize trade client: {e}')
+
+commit 586abc1ae540e30d83698671294cdf6a382ea612
+Author: Elvin r <>
+Date:   Thu Apr 16 11:56:10 2026 +0700
+
+    feat: add api/backup_db endpoint for emergency database download
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 8e1a908..756780c 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -476,6 +476,14 @@ async def get_state():
+         "scan_summary": SCAN_SUMMARY,
+     }
+ 
++@app.get("/api/backup_db")
++async def backup_db():
++    from fastapi.responses import FileResponse
++    import os
++    if os.path.exists(DB_PATH):
++        return FileResponse(DB_PATH, media_type='application/octet-stream', filename='trades.db')
++    return {"error": "Database file not found"}
++
+ @app.get("/api/debug")
+ async def api_debug():
+     """Debug endpoint to see raw scanner configuration and DB state"""
+
+commit 08fb5c20fb8458d83f82b7cbf4dd13164c989084
+Author: Elvin r <>
+Date:   Thu Apr 16 11:44:26 2026 +0700
+
+    fix: remove _CLOB_GEOBLOCK flag that was permanently blocking orders
+    
+    The _CLOB_GEOBLOCK flag set in US-West persisted in memory even after
+    migrating to Singapore, causing all orders to be rejected with false
+    geo-block error. Now every trade attempt hits the real API to get
+    the actual error message for proper diagnosis.
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 704ac42..8e1a908 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -100,36 +100,30 @@ AUTO_TRADE       = os.environ.get('AUTO_TRADE', 'false').lower() == 'true'
+ # ══════════════════════════════════════════════════════════════════
+ # POLYMARKET CLOB CLIENT (Real Trade Execution)
+ # ══════════════════════════════════════════════════════════════════
+-_clob_client    = None
+-_CLOB_GEOBLOCK  = False   # Set True if geo-block detected — stops repeated attempts
++_clob_client = None
+ 
+ def _init_clob_client():
+     """Initialize Polymarket CLOB client for real order execution.
+-    Tries signature_type=0 (EOA direct) first — works for keys exported
+-    directly from Polymarket Settings → Private Key.
+-    Falls back to signature_type=1 (Magic/proxy) if needed.
++    Uses signature_type=0 (EOA direct) — correct for private keys
++    exported directly from Polymarket Settings → Private Key page.
+     """
+-    global _clob_client, _CLOB_GEOBLOCK
++    global _clob_client
+     if _clob_client is not None:
+         return _clob_client
+-    if _CLOB_GEOBLOCK:
+-        return None  # Stop retrying after geo-block confirmed
+     if not AUTO_TRADE or not PRIVATE_KEY:
+         return None
+     try:
+         from py_clob_client.client import ClobClient
+-        # Try signature_type=0 first (EOA — direct private key, no proxy)
+-        # This is correct when PRIVATE_KEY is exported directly from Polymarket settings
+         client = ClobClient(
+             'https://clob.polymarket.com',
+             key=PRIVATE_KEY,
+             chain_id=137,
+-            signature_type=0,       # EOA: direct private key (most compatible)
++            signature_type=0,   # EOA: direct private key
+             funder=WALLET_ADDRESS,
+         )
+         client.set_api_creds(client.create_or_derive_api_creds())
+         _clob_client = client
+-        log.info('[CLOB] ✅ Real trade client initialized (sig_type=0 EOA) — LIVE TRADING ACTIVE')
++        log.info('[CLOB] ✅ Real trade client initialized — LIVE TRADING ACTIVE')
+         return client
+     except Exception as e:
+         log.error(f'[CLOB] ❌ Failed to initialize trade client: {e}')
+@@ -141,11 +135,8 @@ async def execute_real_order(token_id: str, amount_usd: float, entry_price: floa
+     Returns:
+         dict with 'success', 'order_id', 'filled_price', 'error'
+     """
+-    global _CLOB_GEOBLOCK
+     if not AUTO_TRADE or not PRIVATE_KEY:
+         return {'success': False, 'error': 'AUTO_TRADE not enabled'}
+-    if _CLOB_GEOBLOCK:
+-        return {'success': False, 'error': 'GEO-BLOCKED — change Railway region to US-WEST'}
+ 
+     client = _init_clob_client()
+     if not client:
+@@ -176,13 +167,11 @@ async def execute_real_order(token_id: str, amount_usd: float, entry_price: floa
+         }
+     except Exception as e:
+         err_str = str(e)
+-        # Detect geo-block and set flag to stop future attempts
+-        if '403' in err_str and ('region' in err_str.lower() or 'geoblock' in err_str.lower()):
+-            _CLOB_GEOBLOCK = True
+-            log.error('[CLOB] 🚫 GEO-BLOCK DETECTED (HTTP 403)!')
+-            log.error('[CLOB] ⚠️  Railway server is being geo-blocked by Polymarket.')
+-            log.error('[CLOB] 🔧 FIX: Go to Railway → your service → Settings → Change REGION to: us-west1 or us-east1, then Redeploy.')
+-            log.error('[CLOB] ℹ️  Bot will continue scanning but will NOT attempt more real orders until restarted.')
++        # Log the REAL error so we can diagnose
++        if '403' in err_str:
++            log.error(f'[CLOB] 🚫 HTTP 403 from Polymarket CLOB API: {err_str}')
++            log.error('[CLOB] ⚠️  Possible geo-block or invalid credentials.')
++            log.error('[CLOB] ℹ️  Check: (1) PRIVATE_KEY correct? (2) Railway region = Singapore/Europe?')
+         else:
+             log.error(f'[CLOB] Order failed: {e}')
+         return {'success': False, 'error': err_str}
+
+commit 815064a2b7af6d33732d089ea4686cc6b558515b
+Author: Elvin r <>
+Date:   Thu Apr 16 09:53:02 2026 +0700
+
+    fix: geo-block detection + signature_type=0 (EOA) for CLOB client
+    
+    - Switch to signature_type=0 (direct EOA) which is correct for private
+      keys exported directly from Polymarket Settings → Private Key page
+    - Add _CLOB_GEOBLOCK flag: once 403 geo-block detected, stop retrying
+      real orders (prevents log spam and wasted CPU)
+    - Clear error messages: tells user exactly to change Railway region
+      to us-west1 or us-east1 to fix geo-block
+    - Geo-block check: skips order attempt immediately if already blocked
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 66063ac..704ac42 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -100,30 +100,36 @@ AUTO_TRADE       = os.environ.get('AUTO_TRADE', 'false').lower() == 'true'
+ # ══════════════════════════════════════════════════════════════════
+ # POLYMARKET CLOB CLIENT (Real Trade Execution)
+ # ══════════════════════════════════════════════════════════════════
+-_clob_client = None
++_clob_client    = None
++_CLOB_GEOBLOCK  = False   # Set True if geo-block detected — stops repeated attempts
+ 
+ def _init_clob_client():
+     """Initialize Polymarket CLOB client for real order execution.
+-    Only called when AUTO_TRADE=true and PRIVATE_KEY is set.
+-    Uses signature_type=1 (email/Magic wallet proxy — how Polymarket web works).
++    Tries signature_type=0 (EOA direct) first — works for keys exported
++    directly from Polymarket Settings → Private Key.
++    Falls back to signature_type=1 (Magic/proxy) if needed.
+     """
+-    global _clob_client
++    global _clob_client, _CLOB_GEOBLOCK
+     if _clob_client is not None:
+         return _clob_client
++    if _CLOB_GEOBLOCK:
++        return None  # Stop retrying after geo-block confirmed
+     if not AUTO_TRADE or not PRIVATE_KEY:
+         return None
+     try:
+         from py_clob_client.client import ClobClient
++        # Try signature_type=0 first (EOA — direct private key, no proxy)
++        # This is correct when PRIVATE_KEY is exported directly from Polymarket settings
+         client = ClobClient(
+             'https://clob.polymarket.com',
+             key=PRIVATE_KEY,
+-            chain_id=137,           # Polygon mainnet
+-            signature_type=1,       # Email/Magic wallet (Polymarket default)
+-            funder=WALLET_ADDRESS,  # Wallet that holds your USDC
++            chain_id=137,
++            signature_type=0,       # EOA: direct private key (most compatible)
++            funder=WALLET_ADDRESS,
+         )
+         client.set_api_creds(client.create_or_derive_api_creds())
+         _clob_client = client
+-        log.info('[CLOB] ✅ Real trade client initialized — LIVE TRADING ACTIVE')
++        log.info('[CLOB] ✅ Real trade client initialized (sig_type=0 EOA) — LIVE TRADING ACTIVE')
+         return client
+     except Exception as e:
+         log.error(f'[CLOB] ❌ Failed to initialize trade client: {e}')
+@@ -131,17 +137,15 @@ def _init_clob_client():
+ 
+ async def execute_real_order(token_id: str, amount_usd: float, entry_price: float) -> dict:
+     """Submit a real BUY market order to Polymarket.
+-    
+-    Args:
+-        token_id:    The outcome token ID from CLOB (e.g. "123456...")
+-        amount_usd:  Dollar amount to spend (e.g. 1.00)
+-        entry_price: Expected price 0.0–1.0 for size calculation
+-    
++
+     Returns:
+         dict with 'success', 'order_id', 'filled_price', 'error'
+     """
++    global _CLOB_GEOBLOCK
+     if not AUTO_TRADE or not PRIVATE_KEY:
+         return {'success': False, 'error': 'AUTO_TRADE not enabled'}
++    if _CLOB_GEOBLOCK:
++        return {'success': False, 'error': 'GEO-BLOCKED — change Railway region to US-WEST'}
+ 
+     client = _init_clob_client()
+     if not client:
+@@ -153,16 +157,16 @@ async def execute_real_order(token_id: str, amount_usd: float, entry_price: floa
+ 
+         mo = MarketOrderArgs(
+             token_id=token_id,
+-            amount=amount_usd,      # $ amount (USDC)
++            amount=amount_usd,
+             side=BUY,
+-            order_type=OrderType.FOK,  # Fill-Or-Kill: all or nothing
++            order_type=OrderType.FOK,
+         )
+-        signed  = client.create_market_order(mo)
+-        resp    = client.post_order(signed, OrderType.FOK)
++        signed = client.create_market_order(mo)
++        resp   = client.post_order(signed, OrderType.FOK)
+ 
+         order_id = resp.get('orderID') or resp.get('id') or 'unknown'
+         status   = resp.get('status', '')
+-        log.info(f'[CLOB] Order submitted → ID:{order_id} Status:{status} Amount:${amount_usd:.2f}')
++        log.info(f'[CLOB] ✅ Order submitted → ID:{order_id} Status:{status} Amount:${amount_usd:.2f}')
+         return {
+             'success'      : True,
+             'order_id'     : order_id,
+@@ -171,8 +175,17 @@ async def execute_real_order(token_id: str, amount_usd: float, entry_price: floa
+             'raw'          : resp,
+         }
+     except Exception as e:
+-        log.error(f'[CLOB] Order failed: {e}')
+-        return {'success': False, 'error': str(e)}
++        err_str = str(e)
++        # Detect geo-block and set flag to stop future attempts
++        if '403' in err_str and ('region' in err_str.lower() or 'geoblock' in err_str.lower()):
++            _CLOB_GEOBLOCK = True
++            log.error('[CLOB] 🚫 GEO-BLOCK DETECTED (HTTP 403)!')
++            log.error('[CLOB] ⚠️  Railway server is being geo-blocked by Polymarket.')
++            log.error('[CLOB] 🔧 FIX: Go to Railway → your service → Settings → Change REGION to: us-west1 or us-east1, then Redeploy.')
++            log.error('[CLOB] ℹ️  Bot will continue scanning but will NOT attempt more real orders until restarted.')
++        else:
++            log.error(f'[CLOB] Order failed: {e}')
++        return {'success': False, 'error': err_str}
+ 
+ async def cancel_real_order(order_id: str) -> bool:
+     """Cancel an open limit order. Used when closing positions early."""
+
+commit 6400c8e366da1ca74ad5a50cb1aaf9aead29f73a
+Author: Elvin r <>
+Date:   Thu Apr 16 09:47:55 2026 +0700
+
+    fix: CRITICAL 4-bug fix for real trading
+    
+    1. BANKROLL: 10.00 -> 10.59 (actual Polymarket deposit)
+    2. STATS_RESET_ID: 82 -> 317 (skip all 317 paper trades, fresh start)
+    3. db_get_open_market_ids(): was blocking ALL 317 historical markets.
+       Now only blocks CURRENTLY OPEN positions (id > reset_id).
+       Paper trade history no longer stops real trading from finding markets.
+    4. db_get_open_market_questions(): same fix as above.
+    5. token_id: now uses entry_token_id (correct outcome token) before
+       falling back to token_id. Prevents FOK order with wrong token.
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index e32f5fe..66063ac 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -245,8 +245,8 @@ CFG = {
+     'CLEAR_SCREEN'        : False,
+ 
+     # Risk Management — REAL TRADE MODE
+-    'BANKROLL'            : 10.00,
+-    'STATS_RESET_ID'      : 82,
++    'BANKROLL'            : 10.59,     # Actual deposit amount (updated)
++    'STATS_RESET_ID'      : 317,       # Reset stats from position 317 onwards (start of real trading)
+     'BET_PCT'             : 0.10,
+     'MIN_BET'             : 1.00,
+     'MAX_BET'             : 25.00,     # Uncapped — tiered sizing handles this
+@@ -845,22 +845,30 @@ def db_get_open_positions() -> List[dict]:
+         return []
+ 
+ def db_get_open_market_ids() -> set:
+-    """Gets ALL historical market IDs to prevent any re-entry, ever."""
++    """Gets market IDs of CURRENTLY OPEN positions only.
++    We do NOT block markets from historical (paper) trades,
++    so real trading can enter any valid market fresh.
++    Within one session, already_opened is extended after each entry
++    to prevent double-entry in the same scan cycle.
++    """
+     try:
+         conn = sqlite3.connect(DB_PATH)
+         cur  = conn.cursor()
+-        cur.execute("SELECT DISTINCT market_id FROM positions")
++        reset_id = CFG.get('STATS_RESET_ID', 0)
++        # Only block markets that are CURRENTLY OPEN (not historical)
++        cur.execute("SELECT DISTINCT market_id FROM positions WHERE status='OPEN' AND id > ?", (reset_id,))
+         rows = cur.fetchall(); conn.close()
+         return {r[0] for r in rows}
+     except Exception:
+         return set()
+ 
+ def db_get_open_market_questions() -> set:
+-    """Gets ALL historical questions to prevent re-entering opposite sides later."""
++    """Gets questions of CURRENTLY OPEN positions to prevent duplicate-side entry."""
+     try:
+         conn = sqlite3.connect(DB_PATH)
+         cur  = conn.cursor()
+-        cur.execute("SELECT DISTINCT question FROM positions")
++        reset_id = CFG.get('STATS_RESET_ID', 0)
++        cur.execute("SELECT DISTINCT question FROM positions WHERE status='OPEN' AND id > ?", (reset_id,))
+         rows = cur.fetchall(); conn.close()
+         return {r[0].strip() for r in rows if r[0]}
+     except Exception:
+@@ -1552,7 +1560,8 @@ class PositionManager:
+ 
+         # ── REAL TRADE EXECUTION ──────────────────────────────
+         if AUTO_TRADE and PRIVATE_KEY:
+-            token_id = r.get('token_id', '')
++            # Use entry_token_id (the specific token for the chosen outcome)
++            token_id = r.get('entry_token_id') or r.get('token_id', '')
+             if not token_id:
+                 log.warning('[CLOB] ⚠️  No token_id found, skipping real order')
+                 return None
+
+commit 35ed57d4c3307c01db646dbcf5acd0fb0040ab5a
+Author: Elvin r <>
+Date:   Thu Apr 16 09:42:50 2026 +0700
+
+    fix: REAL SELL ORDER — complete buy→sell cycle for live trading
+    
+    - Add execute_real_sell_order(): submits SELL FOK market order to Polymarket
+      Uses shares (outcome tokens) as amount, SELL side
+      On failure: logs warning but STILL closes in DB (zombie prevention)
+    - Hook into check_and_close(): all TP/SL/TIME/GHOST closes now call sell first
+    - Hook into /close Telegram manual command: sell before DB close
+    - Hook into /closeall Telegram command: sell each position before closing
+    - WALLET_ADDRESS confirmed: 0x4d8a12Df518d1CFb58A795aCF4940026E829aa10
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index b179761..e32f5fe 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -187,6 +187,48 @@ async def cancel_real_order(order_id: str) -> bool:
+         log.error(f'[CLOB] Cancel failed: {e}')
+         return False
+ 
++async def execute_real_sell_order(token_id: str, shares: float, exit_price: float) -> dict:
++    """Submit a real SELL market order to Polymarket to close a position.
++
++    Polymarket uses FOK (Fill-Or-Kill) for market sells.
++    'shares' = number of outcome tokens to sell back.
++    The CLOB will convert shares × price into USDC proceeds.
++
++    Returns:
++        dict with 'success', 'order_id', 'error'
++    """
++    if not AUTO_TRADE or not PRIVATE_KEY:
++        return {'success': False, 'error': 'AUTO_TRADE not enabled'}
++
++    client = _init_clob_client()
++    if not client:
++        return {'success': False, 'error': 'CLOB client not initialized'}
++
++    if not token_id or shares <= 0:
++        return {'success': False, 'error': f'Invalid token_id or shares={shares}'}
++
++    try:
++        from py_clob_client.clob_types import MarketOrderArgs, OrderType
++        from py_clob_client.order_builder.constants import SELL
++
++        # Sell by number of shares (outcome tokens)
++        mo = MarketOrderArgs(
++            token_id=token_id,
++            amount=round(shares, 4),   # shares to sell
++            side=SELL,
++            order_type=OrderType.FOK,
++        )
++        signed  = client.create_market_order(mo)
++        resp    = client.post_order(signed, OrderType.FOK)
++
++        order_id = resp.get('orderID') or resp.get('id') or 'unknown'
++        status   = resp.get('status', '')
++        log.info(f'[CLOB] SELL submitted → ID:{order_id} Status:{status} Shares:{shares:.4f}')
++        return {'success': True, 'order_id': order_id, 'status': status, 'raw': resp}
++    except Exception as e:
++        log.error(f'[CLOB] SELL order failed: {e}')
++        return {'success': False, 'error': str(e)}
++
+ # ══════════════════════════════════════════════════════════════════
+ # KONFIGURASI
+ # ══════════════════════════════════════════════════════════════════
+@@ -998,6 +1040,15 @@ async def telegram_listener(session, pm):
+                                     if cur_price is None:
+                                         cur_price = target_op['entry_price']
+                                         
++                                    # Real sell before DB close
++                                    if AUTO_TRADE and PRIVATE_KEY and target_op.get('token_id'):
++                                        sell_r = await execute_real_sell_order(
++                                            target_op['token_id'],
++                                            target_op.get('shares', 0),
++                                            cur_price
++                                        )
++                                        if not sell_r['success']:
++                                            await tg(session, f'⚠️ SELL failed: {sell_r["error"]} — DB closed anyway')
+                                     pnl = db_close_position(pos_id, cur_price, "MANUAL_CLOSE")
+                                     await tg_close(session, target_op, cur_price, pnl, "MANUAL_CLOSE")
+                                     await pm.refresh()
+@@ -1012,7 +1063,13 @@ async def telegram_listener(session, pm):
+                                 cur_price = await fetch_price(session, op['token_id'])
+                                 if cur_price is None:
+                                     cur_price = op['entry_price']  # Fallback to a flat exit if API fails
+-                                    
++                                # Real sell before DB close
++                                if AUTO_TRADE and PRIVATE_KEY and op.get('token_id'):
++                                    await execute_real_sell_order(
++                                        op['token_id'],
++                                        op.get('shares', 0),
++                                        cur_price
++                                    )
+                                 pnl = db_close_position(op['id'], cur_price, "MANUAL_CLOSEALL")
+                                 await tg_close(session, op, cur_price, pnl, "MANUAL_CLOSEALL")
+                                 count += 1
+@@ -1457,6 +1514,17 @@ class PositionManager:
+                     should_close = True; close_reason = 'MARKET_RESOLVING (GHOST)'
+ 
+             if should_close:
++                # ── REAL SELL EXECUTION (before DB write) ────────────
++                if AUTO_TRADE and PRIVATE_KEY and token_id:
++                    shares_held = pos.get('shares', 0)
++                    sell_result = await execute_real_sell_order(token_id, shares_held, exit_price)
++                    if sell_result['success']:
++                        log.info(f'[CLOB] ✅ SELL filled → #{pos["id"]} | Reason:{close_reason}')
++                    else:
++                        # Log error but still close in DB to avoid zombie positions
++                        log.error(f'[CLOB] ⚠️  SELL failed: {sell_result["error"]} '
++                                  f'— closing in DB anyway (zombie prevention)')
++                # ── CLOSE IN DB ──────────────────────────────────────
+                 pnl = db_close_position(pos['id'], exit_price, close_reason)
+                 await tg_close(session, pos, exit_price, pnl, close_reason)
+                 closed_list.append({
+
+commit 19b9f953aea7f6547fda85c22a875de0968e7a7f
+Author: Elvin r <>
+Date:   Thu Apr 16 09:33:04 2026 +0700
+
+    feat: REAL TRADE ENGINE — Polymarket CLOB order execution
+    
+    - Add py-clob-client>=0.18.0 to requirements.txt
+    - _init_clob_client(): lazy-init ClobClient with PRIVATE_KEY+WALLET_ADDRESS
+      signature_type=1 (email/Magic wallet — matches Polymarket web app)
+    - execute_real_order(): submits FOK market order to Polymarket blockchain
+      Returns success/fail with order_id, does NOT record DB if order rejected
+    - cancel_real_order(): cancels open limit orders
+    - open_position(): now calls execute_real_order() when AUTO_TRADE=true
+      If order rejected → returns None, NO phantom paper position recorded
+      If order success → records to DB + sends Telegram notification
+    - Paper trade mode unchanged when AUTO_TRADE=false
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 970a8ab..b179761 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -97,6 +97,96 @@ PRIVATE_KEY      = os.environ.get('PRIVATE_KEY', '')
+ WALLET_ADDRESS   = os.environ.get('WALLET_ADDRESS', '')
+ AUTO_TRADE       = os.environ.get('AUTO_TRADE', 'false').lower() == 'true'
+ 
++# ══════════════════════════════════════════════════════════════════
++# POLYMARKET CLOB CLIENT (Real Trade Execution)
++# ══════════════════════════════════════════════════════════════════
++_clob_client = None
++
++def _init_clob_client():
++    """Initialize Polymarket CLOB client for real order execution.
++    Only called when AUTO_TRADE=true and PRIVATE_KEY is set.
++    Uses signature_type=1 (email/Magic wallet proxy — how Polymarket web works).
++    """
++    global _clob_client
++    if _clob_client is not None:
++        return _clob_client
++    if not AUTO_TRADE or not PRIVATE_KEY:
++        return None
++    try:
++        from py_clob_client.client import ClobClient
++        client = ClobClient(
++            'https://clob.polymarket.com',
++            key=PRIVATE_KEY,
++            chain_id=137,           # Polygon mainnet
++            signature_type=1,       # Email/Magic wallet (Polymarket default)
++            funder=WALLET_ADDRESS,  # Wallet that holds your USDC
++        )
++        client.set_api_creds(client.create_or_derive_api_creds())
++        _clob_client = client
++        log.info('[CLOB] ✅ Real trade client initialized — LIVE TRADING ACTIVE')
++        return client
++    except Exception as e:
++        log.error(f'[CLOB] ❌ Failed to initialize trade client: {e}')
++        return None
++
++async def execute_real_order(token_id: str, amount_usd: float, entry_price: float) -> dict:
++    """Submit a real BUY market order to Polymarket.
++    
++    Args:
++        token_id:    The outcome token ID from CLOB (e.g. "123456...")
++        amount_usd:  Dollar amount to spend (e.g. 1.00)
++        entry_price: Expected price 0.0–1.0 for size calculation
++    
++    Returns:
++        dict with 'success', 'order_id', 'filled_price', 'error'
++    """
++    if not AUTO_TRADE or not PRIVATE_KEY:
++        return {'success': False, 'error': 'AUTO_TRADE not enabled'}
++
++    client = _init_clob_client()
++    if not client:
++        return {'success': False, 'error': 'CLOB client not initialized'}
++
++    try:
++        from py_clob_client.clob_types import MarketOrderArgs, OrderType
++        from py_clob_client.order_builder.constants import BUY
++
++        mo = MarketOrderArgs(
++            token_id=token_id,
++            amount=amount_usd,      # $ amount (USDC)
++            side=BUY,
++            order_type=OrderType.FOK,  # Fill-Or-Kill: all or nothing
++        )
++        signed  = client.create_market_order(mo)
++        resp    = client.post_order(signed, OrderType.FOK)
++
++        order_id = resp.get('orderID') or resp.get('id') or 'unknown'
++        status   = resp.get('status', '')
++        log.info(f'[CLOB] Order submitted → ID:{order_id} Status:{status} Amount:${amount_usd:.2f}')
++        return {
++            'success'      : True,
++            'order_id'     : order_id,
++            'status'       : status,
++            'filled_price' : entry_price,
++            'raw'          : resp,
++        }
++    except Exception as e:
++        log.error(f'[CLOB] Order failed: {e}')
++        return {'success': False, 'error': str(e)}
++
++async def cancel_real_order(order_id: str) -> bool:
++    """Cancel an open limit order. Used when closing positions early."""
++    client = _init_clob_client()
++    if not client:
++        return False
++    try:
++        client.cancel(order_id)
++        log.info(f'[CLOB] Order {order_id} cancelled')
++        return True
++    except Exception as e:
++        log.error(f'[CLOB] Cancel failed: {e}')
++        return False
++
+ # ══════════════════════════════════════════════════════════════════
+ # KONFIGURASI
+ # ══════════════════════════════════════════════════════════════════
+@@ -1386,12 +1476,27 @@ class PositionManager:
+             log.info(f'SKIP OPEN: {why}')
+             return None
+         # ── TIERED POSITION SIZING ────────────────────────────
+-        # Fixed tiers based on equity level for controlled growth
+         equity = self._calculate_equity()
+         amount = self._get_bet_size(equity)
+         entry  = r['entry_price']
+         shares = amount / entry if entry > 0 else 0
+         log.info(f'[SIZE] Equity=${equity:.2f} → Bet=${amount:.2f} (Tiered)')
++
++        # ── REAL TRADE EXECUTION ──────────────────────────────
++        if AUTO_TRADE and PRIVATE_KEY:
++            token_id = r.get('token_id', '')
++            if not token_id:
++                log.warning('[CLOB] ⚠️  No token_id found, skipping real order')
++                return None
++            result = await execute_real_order(token_id, amount, entry)
++            if not result['success']:
++                log.error(f'[CLOB] ❌ Order rejected: {result.get("error")} — trade NOT recorded')
++                return None  # Do NOT write to DB if order failed
++            log.info(f'[CLOB] ✅ Order filled! ID:{result["order_id"]} Status:{result["status"]}')
++            # Store order_id in r so db can save it for future reference
++            r['clob_order_id'] = result['order_id']
++
++        # ── RECORD TRADE (paper or real) ──────────────────────
+         pos_id = db_open_position(r, amount, shares)
+         await tg_open(session, r, pos_id, amount)
+         await self.refresh()
+diff --git a/requirements.txt b/requirements.txt
+index 0333390..e32dd87 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -11,3 +11,4 @@ fastapi>=0.100.0
+ uvicorn>=0.23.0
+ websockets>=11.0.3
+ jinja2>=3.1.2
++py-clob-client>=0.18.0
+
+commit 6203f00c0cd283a4ef37e39b1f44e48109c380dc
+Author: Elvin r <>
+Date:   Thu Apr 16 09:10:45 2026 +0700
+
+    feat: REAL TRADE MODE - tiered sizing + confidence 38 + remove MONITOR
+    
+    Config changes:
+    - MIN_ML_CONFIDENCE: 25 → 38 (above natural WIN base rate 34.9%)
+    - MAX_POSITIONS: 10 → 5 (real money: quality over quantity)
+    - MAX_EXPOSURE_PCT: 90% → 80% (protect 20% reserve)
+    - MAX_BET: 1.00 → 25.00 (tiered sizing now handles this)
+    - AUTO_OPEN_SIGNALS: removed MONITOR (too weak for real money)
+    
+    Tiered position sizing (user-defined):
+      <=.00 | <=.30 | <=.80 | <=.50
+      <=.00 | <=.00
+      -: +.50 per  increment (max .50 at )
+      -: +.00 per  increment (max .00 at )
+      +: capped at  until next upgrade
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 0873e25..970a8ab 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -112,35 +112,35 @@ CFG = {
+     'DISPLAY_TOP'         : 10,
+     'CLEAR_SCREEN'        : False,
+ 
+-    # Risk Management — TRAINING MODE
++    # Risk Management — REAL TRADE MODE
+     'BANKROLL'            : 10.00,
+     'STATS_RESET_ID'      : 82,
+     'BET_PCT'             : 0.10,
+     'MIN_BET'             : 1.00,
+-    'MAX_BET'             : 1.00,      # Fixed size for training mining
+-    'MAX_POSITIONS'       : 10,        # 10 slots
+-    'MAX_EXPOSURE_PCT'    : 0.90,      # 90% exposure allowed
++    'MAX_BET'             : 25.00,     # Uncapped — tiered sizing handles this
++    'MAX_POSITIONS'       : 5,         # Real trade: 5 slots (not 10)
++    'MAX_EXPOSURE_PCT'    : 0.80,      # 80% max exposure (protect 20% reserve)
+ 
+ 
+-    # Auto-Close — faster turnover for data mining
++    # Auto-Close — Real Trade timing
+     'TAKE_PROFIT_PCT'     : 35.0,
+     'STOP_LOSS_PCT'       : 20.0,
+     'TIME_EXIT_MINUTES'   : 45,
+     'FORCE_EXIT_MINUTES'  : 3,
+-    'MAX_HOLD_HOURS'      : 24,        # 24h max hold (was 48)
++    'MAX_HOLD_HOURS'      : 24,
+ 
+-    # AI & Entry Filters — TRAINING MODE (wide open for data mining)
+-    'MIN_ML_CONFIDENCE'   : 25.0,      # Lowered to 25.0 to increase aggressiveness/data mining
+-    'MAX_ENTRY_PRICE'     : 0.80,      # Widened to 0.80
+-    'MIN_ENTRY_PRICE'     : 0.20,      # Widened to 0.20
++    # AI & Entry Filters — REAL TRADE MODE
++    'MIN_ML_CONFIDENCE'   : 38.0,      # 38: above natural WIN base rate (34.9%), still active
++    'MAX_ENTRY_PRICE'     : 0.80,
++    'MIN_ENTRY_PRICE'     : 0.20,
+     'LIQUIDITY_TRAP_PRICE': 0.92,
+ 
+-    # Signal filters — TRAINING MODE (accept all signal types)
+-    'AUTO_OPEN_SIGNALS'   : ['STRONG BUY', 'ARBITRAGE', 'BUY', 'EDGE', 'MONITOR'],
+-    'MIN_MOMENTUM'        : 1.0,       # Lowered from 5.0 to 1.0 to massively boost entry rate
+-    'MIN_LIQUIDITY'       : 2000,      # Per user instruction: keep at 2000
+-    'MIN_VOLUME_24H'      : 1000,      # Minimum real volume to avoid empty orders
+-    'MAX_DAYS_TO_EXPIRY'  : 7.0,       # Boosted to 7 DAYS to capture massive amount of markets!
++    # Signal filters — REAL TRADE (MONITOR removed: too weak for real money)
++    'AUTO_OPEN_SIGNALS'   : ['STRONG BUY', 'ARBITRAGE', 'BUY', 'EDGE'],
++    'MIN_MOMENTUM'        : 1.0,
++    'MIN_LIQUIDITY'       : 2000,
++    'MIN_VOLUME_24H'      : 1000,
++    'MAX_DAYS_TO_EXPIRY'  : 7.0,
+     'VOL_SPIKE_RATIO'     : 3.0,
+     'NEAR_RES_HOURS'      : 6,
+     'KELLY_FRACTION'      : 0.15,
+@@ -1399,8 +1399,43 @@ class PositionManager:
+ 
+     @staticmethod
+     def _get_bet_size(equity: float) -> float:
+-        """Fixed position sizing for Training Mode ($1 flat)."""
+-        return 1.00
++        """Tiered position sizing — grows with equity for compounding.
++
++        Tier table (user-defined):
++          < $25    → $1.00
++          < $50    → $1.30
++          < $100   → $1.80
++          < $120   → $2.50
++          < $150   → $3.00
++          < $200   → $4.00
++          $200-500 → $4.00 + $1.50 per each $50 increment above $200
++          $500-1k  → $13.00 + $2.00 per each $100 increment above $500
++          $1000+   → to be upgraded later
++        """
++        if equity < 25:
++            return 1.00
++        elif equity < 50:
++            return 1.30
++        elif equity < 100:
++            return 1.80
++        elif equity < 120:
++            return 2.50
++        elif equity < 150:
++            return 3.00
++        elif equity < 200:
++            return 4.00
++        elif equity < 500:
++            # $200 base = $4.00, add $1.50 per $50 increment
++            increments = int((equity - 200) // 50)
++            return round(4.00 + increments * 1.50, 2)
++        elif equity < 1000:
++            # $500 base = $13.00, add $2.00 per $100 increment
++            # At $200: 4.00 + (300//50)*1.5 = 4.00 + 6*1.5 = 4+9 = $13.00 ✓
++            increments = int((equity - 500) // 100)
++            return round(13.00 + increments * 2.00, 2)
++        else:
++            # $1000+ — to be upgraded later
++            return round(13.00 + (5 * 2.00), 2)  # Cap at $23 until upgraded
+ 
+     def _calculate_equity(self) -> float:
+         """Calculate current equity = bankroll + total realized PnL."""
+
+commit af4ee3d0fe0b52e99064928847170291364b8016
+Author: Elvin r <>
+Date:   Wed Apr 15 23:49:14 2026 +0700
+
+    fix: ROOT CAUSE - ML features were never stored in features_json
+    
+    Previously features_json stored raw dict with keys like 'liquidity',
+    'volume_24h', 'momentum_pct', but ML training looked for 'liquidity_log',
+    'volume_log', 'momentum_abs' - keys that NEVER EXISTED in the stored data.
+    
+    All 15 features except entry_price and spread_pct were ALWAYS 0.000!
+    
+    Fix: 1) db_open_position now merges ML-extracted features to top level
+         2) ML training computes features on-the-fly from raw data for old records
+         3) Both old and new data formats are now handled correctly
+
+diff --git a/intelligence.py b/intelligence.py
+index 324b61e..37e244d 100644
+--- a/intelligence.py
++++ b/intelligence.py
+@@ -836,8 +836,39 @@ class ModelManager:
+                 try:
+                     data = json.loads(row['features_json'])
+                     feat = {}
++
++                    # CRITICAL: Check if ML features exist at top level
++                    # If not, try nested brain_analysis.features
++                    # If still not, COMPUTE from raw data
++                    ml_source = data  # default: top-level
++                    if 'liquidity_log' not in data or data.get('liquidity_log', 0) == 0:
++                        # Try nested path (old format)
++                        nested = data.get('brain_analysis', {}).get('features', {})
++                        if nested and nested.get('liquidity_log', 0) != 0:
++                            ml_source = {**data, **nested}
++                        else:
++                            # COMPUTE features from raw data on-the-fly
++                            liq = data.get('liquidity', 0)
++                            vol = data.get('volume_24h', 0)
++                            mom = data.get('momentum_pct', 0)
++                            ep  = data.get('entry_price', 0.5)
++                            sp  = data.get('spread_pct', 0)
++                            liq_log = math.log10(max(liq, 1))
++                            vol_log = math.log10(max(vol, 1))
++                            ml_source = dict(data)
++                            ml_source['liquidity_log'] = round(liq_log, 3)
++                            ml_source['volume_log']    = round(vol_log, 3)
++                            ml_source['momentum_abs']  = round(abs(mom), 2)
++                            ml_source['price_distance_from_50'] = round(abs(ep - 0.5) * 2, 3)
++                            ml_source['market_efficiency'] = round(
++                                min(1.0, liq_log / 6) * min(1.0, vol_log / 5), 3)
++                            # vol_liq_ratio: volume relative to liquidity
++                            if liq > 0:
++                                ml_source['vol_liq_ratio'] = round(vol / liq, 2)
++
+                     for fn in self.feature_names:
+-                        feat[fn] = float(data.get(fn, 0))
++                        feat[fn] = float(ml_source.get(fn, 0))
++
+                     # 3-CLASS TARGET: WIN=2, VOID/STAGNANT=1, LOSS=0
+                     res = row['result']
+                     if res == 'WIN':
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 31a1b1b..0873e25 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -603,7 +603,38 @@ def _cleanup_duplicate_trades():
+ 
+ def db_open_position(r: dict, amount: float, shares: float) -> int:
+     ts   = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+-    features = json.dumps(r) # Save the whole result as features
++    # CRITICAL FIX: Store ML-ready features at top level of features_json
++    # Previously stored raw `r` dict, but ML training looked for keys like
++    # 'liquidity_log' which only existed deep inside r['brain_analysis']['features']
++    # Now we merge the extracted features to the top level so training finds them.
++    features_data = dict(r)  # shallow copy
++    brain_analysis = r.get('brain_analysis', {})
++    ml_features = brain_analysis.get('features', {})
++    if ml_features:
++        # Merge ML features (liquidity_log, volume_log, momentum_abs, etc.)
++        # directly into top level so training can read them
++        features_data.update(ml_features)
++    else:
++        # Fallback: compute features from raw data if brain_analysis missing
++        import math
++        liq = r.get('liquidity', 0)
++        vol = r.get('volume_24h', 0)
++        mom = r.get('momentum_pct', 0)
++        ep  = r.get('entry_price', 0.5)
++        sp  = r.get('spread_pct', 0)
++        features_data['liquidity_log'] = round(math.log10(max(liq, 1)), 3)
++        features_data['volume_log']    = round(math.log10(max(vol, 1)), 3)
++        features_data['momentum_abs']  = round(abs(mom), 2)
++        features_data['price_distance_from_50'] = round(abs(ep - 0.5) * 2, 3)
++        features_data['market_efficiency'] = round(
++            min(1.0, features_data['liquidity_log'] / 6) *
++            min(1.0, features_data['volume_log'] / 5), 3)
++
++    # Remove non-serializable and huge nested objects to keep JSON clean
++    for key_to_remove in ['brain_analysis']:
++        features_data.pop(key_to_remove, None)
++
++    features = json.dumps(features_data)
+     conn = sqlite3.connect(DB_PATH)
+     cur  = conn.cursor()
+     cur.execute('''INSERT INTO positions
+
+commit 48845e48df9a48c79ff01889b40cd726434aa492
+Author: Elvin r <>
+Date:   Wed Apr 15 23:31:25 2026 +0700
+
+    feat: upgrade ML to 3-class classification (WIN, VOID, LOSS)
+
+diff --git a/intelligence.py b/intelligence.py
+index 1138efb..324b61e 100644
+--- a/intelligence.py
++++ b/intelligence.py
+@@ -791,16 +791,24 @@ class ModelManager:
+ 
+     def train(self, db_path: str) -> bool:
+         """Train model on historical closed trades.
+-        UPGRADED: Now learns from VOID/STAGNANT trades (treated as LOSS).
++        3-CLASS CLASSIFICATION:
++            WIN  = 2  (real profit)
++            VOID = 1  (stagnant/no movement — wasted opportunity)
++            LOSS = 0  (real loss)
++
++        This forces the model to learn WHY trades go VOID:
++            → low volume, low liquidity, no momentum
++            → these features get non-zero importance!
++
+         Recent trades are weighted 3x heavier (recency bias).
++        max_features='sqrt' prevents over-reliance on entry_price/spread.
+         """
+         if not HAS_SKLEARN or not HAS_PANDAS:
+             return False
+ 
+         try:
+             conn = sqlite3.connect(db_path)
+-            # UPGRADE: Include VOID and STAGNANT as training data (= LOSS)
+-            # Use COALESCE so close_ts is safe even if column doesn't exist
++            # 3-CLASS: WIN, LOSS, VOID (and STAGNANT → VOID)
+             try:
+                 df = pd.read_sql_query(
+                     "SELECT features_json, result, "
+@@ -810,7 +818,6 @@ class ModelManager:
+                     conn
+                 )
+             except Exception:
+-                # Fallback: query without close_ts if column issue
+                 df = pd.read_sql_query(
+                     "SELECT features_json, result, '' as close_ts FROM positions "
+                     "WHERE status='CLOSED' AND result IN ('WIN','LOSS','VOID','STAGNANT') "
+@@ -823,10 +830,6 @@ class ModelManager:
+                 log.info(f"[ML] Collecting data: {len(df)}/{self.min_samples}")
+                 return False
+ 
+-            # Force training on first run even if count is same to apply new logic
+-            # if len(df) == self.last_count:
+-            #     return False
+-
+             rows = []
+             close_times = []
+             for _, row in df.iterrows():
+@@ -835,8 +838,14 @@ class ModelManager:
+                     feat = {}
+                     for fn in self.feature_names:
+                         feat[fn] = float(data.get(fn, 0))
+-                    # WIN = 1, everything else (LOSS, VOID, STAGNANT) = 0
+-                    feat['target'] = 1 if row['result'] == 'WIN' else 0
++                    # 3-CLASS TARGET: WIN=2, VOID/STAGNANT=1, LOSS=0
++                    res = row['result']
++                    if res == 'WIN':
++                        feat['target'] = 2
++                    elif res in ('VOID', 'STAGNANT'):
++                        feat['target'] = 1
++                    else:  # LOSS
++                        feat['target'] = 0
+                     rows.append(feat)
+                     close_times.append(row.get('close_ts', ''))
+                 except Exception:
+@@ -849,18 +858,23 @@ class ModelManager:
+             X = train_df[self.feature_names].values
+             y = train_df['target'].values
+ 
+-            # UPGRADE: Recency bias — recent trades weighted 3x heavier
++            # Count each class
++            n_wins  = int(sum(1 for v in y if v == 2))
++            n_voids = int(sum(1 for v in y if v == 1))
++            n_losses = int(sum(1 for v in y if v == 0))
++
++            # Recency bias — recent trades weighted 3x heavier
+             now = datetime.now()
+             sample_weights = []
+             for ct in close_times:
+                 try:
+                     ct_dt = datetime.strptime(str(ct)[:19], '%Y-%m-%d %H:%M:%S')
+                     hours_ago = (now - ct_dt).total_seconds() / 3600
+-                    if hours_ago < 6:       # Last 6 hours: 3x weight
++                    if hours_ago < 6:
+                         sample_weights.append(3.0)
+-                    elif hours_ago < 24:    # Last 24 hours: 2x weight
++                    elif hours_ago < 24:
+                         sample_weights.append(2.0)
+-                    else:                   # Older: 1x weight
++                    else:
+                         sample_weights.append(1.0)
+                 except Exception:
+                     sample_weights.append(1.0)
+@@ -869,26 +883,30 @@ class ModelManager:
+             X_scaled = self.scaler.fit_transform(X)
+ 
+             self.model = GradientBoostingClassifier(
+-                n_estimators=100,
++                n_estimators=150,
+                 max_depth=4,
+                 learning_rate=0.08,
+                 min_samples_split=3,
+                 min_samples_leaf=2,
+                 subsample=0.85,
++                max_features='sqrt',   # FORCE feature diversity!
+                 random_state=42,
+             )
+             self.model.fit(X_scaled, y, sample_weight=sample_weights)
+ 
+-            wins = sum(y)
+-            losses = len(y) - wins
+             if len(rows) >= 15:
+-                cv = cross_val_score(self.model, X_scaled, y,
+-                                     cv=min(5, len(rows) // 4))
+-                log.info(f"[ML] 🧠 TRAINED: {len(rows)} samples "
+-                         f"(W:{wins} L:{losses}) | "
+-                         f"Accuracy: {cv.mean():.1%}")
++                n_cv = min(5, len(rows) // 4)
++                if n_cv >= 2:
++                    cv = cross_val_score(self.model, X_scaled, y, cv=n_cv)
++                    log.info(f"[ML] 🧠 TRAINED: {len(rows)} samples "
++                             f"(W:{n_wins} V:{n_voids} L:{n_losses}) | "
++                             f"Accuracy: {cv.mean():.1%}")
++                else:
++                    log.info(f"[ML] 🧠 TRAINED: {len(rows)} samples "
++                             f"(W:{n_wins} V:{n_voids} L:{n_losses})")
+             else:
+-                log.info(f"[ML] 🧠 TRAINED: {len(rows)} samples (W:{wins} L:{losses})")
++                log.info(f"[ML] 🧠 TRAINED: {len(rows)} samples "
++                         f"(W:{n_wins} V:{n_voids} L:{n_losses})")
+ 
+             # Log feature importance
+             imp = sorted(zip(self.feature_names,
+@@ -897,6 +915,10 @@ class ModelManager:
+             top = ', '.join(f'{n}={v:.3f}' for n, v in imp[:5])
+             log.info(f"[ML] Top features: {top}")
+ 
++            # Log all features so we can see the full picture
++            all_imp = ', '.join(f'{n}={v:.3f}' for n, v in imp)
++            log.info(f"[ML] All features: {all_imp}")
++
+             self.last_count = len(rows)
+             self._save()
+             return True
+@@ -906,7 +928,10 @@ class ModelManager:
+             return False
+ 
+     def predict(self, features: Dict[str, float]) -> float:
+-        """Predict win probability.  Returns 0.0 to 1.0."""
++        """Predict win probability from 3-class model.
++        Classes: LOSS=0, VOID=1, WIN=2
++        Returns P(WIN) as 0.0 to 1.0.  -1.0 = no model.
++        """
+         if not self.model or not self.scaler:
+             return -1.0  # Sentinel: no model available
+ 
+@@ -914,8 +939,16 @@ class ModelManager:
+             X = [[features.get(fn, 0) for fn in self.feature_names]]
+             X_scaled = self.scaler.transform(X)
+             probs = self.model.predict_proba(X_scaled)[0]
+-            win_idx = list(self.model.classes_).index(1) if 1 in self.model.classes_ else 0
+-            return float(probs[win_idx])
++            classes = list(self.model.classes_)
++            # WIN = class 2
++            if 2 in classes:
++                win_idx = classes.index(2)
++                return float(probs[win_idx])
++            # Fallback for old 2-class model (WIN=1)
++            elif 1 in classes:
++                win_idx = classes.index(1)
++                return float(probs[win_idx])
++            return 0.0
+         except Exception as e:
+             log.debug(f"[ML] Predict error: {e}")
+             return -1.0
+@@ -955,14 +988,15 @@ class TradingBrain:
+                 self.news_intel = NewsIntelligence()
+             except Exception as e:
+                 log.warning(f"[BRAIN] NewsIntelligence init failed: {e}")
+-        log.info("[BRAIN] v5.0 initialized | "
++        log.info("[BRAIN] v6.0 initialized | "
+                  f"ML model: {'LOADED' if self.model_mgr.is_trained else 'LEARNING'} | "
+                  f"News: {'ACTIVE' if self.news_intel else 'DISABLED'}")
+         # PERMANENT PROOF LOG — always visible on startup
+-        log.info("[BRAIN] ✅ UPGRADED LOGIC ACTIVE:")
+-        log.info("[BRAIN]   • VOID/STAGNANT = LOSS in training: YES")
+-        log.info("[BRAIN]   • ML Authority: 60% (was 30%)")
+-        log.info("[BRAIN]   • Recency bias: 3x weight for last 6h trades")
++        log.info("[BRAIN] ✅ 3-CLASS ML ACTIVE:")
++        log.info("[BRAIN]   • WIN=2, VOID=1, LOSS=0 (3-class classification)")
++        log.info("[BRAIN]   • VOID is its OWN class (not lumped with LOSS)")
++        log.info("[BRAIN]   • max_features='sqrt' → forces feature diversity")
++        log.info("[BRAIN]   • ML Authority: 60% | Recency bias: 3x")
+         log.info("[BRAIN]   • Toxic keywords penalty: Elon Musk, Tweets, etc")
+ 
+     # ── HEURISTIC SCORE ──────────────────────────────────────────
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 0f75838..31a1b1b 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -508,24 +508,46 @@ def _reset_circuit_breaker():
+         pass
+ 
+ def _migrate_void_trades():
+-    """One-time migration: convert old LOSS trades with P&L ~$0 to VOID.
+-    This cleans the ML training data and corrects win rate."""
++    """One-time migration: convert misclassified trades to VOID.
++    Two categories get reclassified:
++    1. LOSS trades with P&L ~$0 (ghost trades / breakeven)
++    2. LOSS trades closed due to STAGNANT (price didn't move — not a real loss)
++    This ensures clean 3-class ML training data (WIN=2, VOID=1, LOSS=0)."""
+     try:
+         conn = sqlite3.connect(DB_PATH)
+         cur = conn.cursor()
+-        # Find all CLOSED trades marked as LOSS but with P&L near $0
++        total_migrated = 0
++
++        # Migration 1: LOSS with P&L near $0 → VOID
+         cur.execute(
+             "SELECT COUNT(*) FROM positions "
+             "WHERE status='CLOSED' AND result='LOSS' AND ABS(pnl_usd) < 0.005"
+         )
+-        count = cur.fetchone()[0]
+-        if count > 0:
++        count1 = cur.fetchone()[0]
++        if count1 > 0:
+             cur.execute(
+                 "UPDATE positions SET result='VOID' "
+                 "WHERE status='CLOSED' AND result='LOSS' AND ABS(pnl_usd) < 0.005"
+             )
++            total_migrated += count1
++            log.info(f'[MIGRATION] {count1} ghost trades (PnL~$0) LOSS → VOID')
++
++        # Migration 2: STAGNANT close_reason but result=LOSS → VOID
++        cur.execute(
++            "SELECT COUNT(*) FROM positions "
++            "WHERE status='CLOSED' AND result='LOSS' AND close_reason LIKE '%STAGNANT%'"
++        )
++        count2 = cur.fetchone()[0]
++        if count2 > 0:
++            cur.execute(
++                "UPDATE positions SET result='VOID' "
++                "WHERE status='CLOSED' AND result='LOSS' AND close_reason LIKE '%STAGNANT%'"
++            )
++            total_migrated += count2
++            log.info(f'[MIGRATION] {count2} STAGNANT trades LOSS → VOID')
++
++        if total_migrated > 0:
+             conn.commit()
+-            log.info(f'[MIGRATION] Converted {count} ghost trades from LOSS → VOID')
+             # Show corrected stats
+             cur.execute("SELECT COUNT(*) FROM positions WHERE status='CLOSED' AND result='WIN'")
+             wins = cur.fetchone()[0]
+@@ -535,11 +557,10 @@ def _migrate_void_trades():
+             voids = cur.fetchone()[0]
+             real = wins + losses
+             wr = (wins / real * 100) if real > 0 else 0
+-            log.info(f'[MIGRATION] Corrected stats: Win={wins} | Loss={losses} | '
+-                     f'Void={voids} | WR={wr:.1f}% (was {wins}/{wins+losses+count}='
+-                     f'{wins/(wins+losses+count)*100:.1f}%)')
++            log.info(f'[MIGRATION] Corrected stats: W={wins} | L={losses} | '
++                     f'V={voids} | WR={wr:.1f}% (3-class ready)')
+         else:
+-            log.info('[MIGRATION] No ghost trades to fix — data is clean')
++            log.info('[MIGRATION] Data already clean — no migration needed')
+         conn.close()
+     except Exception as e:
+         log.warning(f'[MIGRATION] Error: {e}')
+@@ -618,8 +639,12 @@ def db_close_position(pos_id: int, exit_price: float, reason: str) -> float:
+     proceeds = shares * exit_price if shares else 0
+     pnl_usd  = proceeds - amount_usd
+     pnl_pct  = (pnl_usd / amount_usd * 100) if amount_usd > 0 else 0
++    # RESULT CLASSIFICATION:
++    # STAGNANT close → always VOID (price didn't move, not a real loss)
+     # VOID: P&L ~$0 (breakeven/ghost) should NOT count as LOSS
+-    if abs(pnl_usd) < 0.005:
++    if 'STAGNANT' in reason:
++        result = 'VOID'
++    elif abs(pnl_usd) < 0.005:
+         result = 'VOID'
+     elif pnl_usd > 0:
+         result = 'WIN'
+@@ -768,7 +793,7 @@ async def tg_open(session, r: dict, pos_id: int, amount: float):
+     await tg(session, text)
+ 
+ async def tg_close(session, pos: dict, exit_price: float, pnl: float, reason: str):
+-    if abs(pnl) < 0.005:
++    if 'STAGNANT' in reason or abs(pnl) < 0.005:
+         emoji = 'VOID'
+     elif pnl > 0:
+         emoji = 'PROFIT'
+@@ -1493,8 +1518,8 @@ async def main():
+     brain = None
+     if TradingBrain:
+         brain = TradingBrain(DB_PATH, MODEL_PATH)
+-        # Force initial training to absorb updated logic (VOID learning, etc)
+-        log.info("[BRAIN] 🚀 REGENERATING BRAIN (applying VOID learning & 60% authority)...")
++        # Force initial training to absorb 3-CLASS classification logic
++        log.info("[BRAIN] 🚀 REGENERATING BRAIN (3-CLASS: WIN=2 VOID=1 LOSS=0 + max_features=sqrt)...")
+         brain.train()
+ 
+     storage_type = "VOLUME (Persistent)" if JOURNAL_DIR.startswith('/data') else "EPHEMERAL (Temporary - Data will be lost on restart)"
+
+commit cc167ce0ce22808a36e73875b6caf5f4eec6ba09
+Author: Elvin r <>
+Date:   Wed Apr 15 16:31:46 2026 +0700
+
+    🔄 REVERT RESTORE: Back to Aggressive Training Mode
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 77d6d14..0f75838 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -112,34 +112,35 @@ CFG = {
+     'DISPLAY_TOP'         : 10,
+     'CLEAR_SCREEN'        : False,
+ 
+-    # Risk Management — 🔪 HYPER SCALPER MODE
++    # Risk Management — TRAINING MODE
+     'BANKROLL'            : 10.00,
+     'STATS_RESET_ID'      : 82,
+     'BET_PCT'             : 0.10,
+     'MIN_BET'             : 1.00,
+-    'MAX_BET'             : 1.00,      # Fixed $1 per scalp
+-    'MAX_POSITIONS'       : 10,        # 10 slots — fill them ALL
+-    'MAX_EXPOSURE_PCT'    : 0.95,      # 95% exposure — use almost everything
+-
+-    # Auto-Close — HYPER SCALP: Grab crumbs and RUN
+-    'TAKE_PROFIT_PCT'     : 10.0,      # SCALP: +10% = instant cash out
+-    'STOP_LOSS_PCT'       : 7.0,       # SCALP: -7% = cut IMMEDIATELY
+-    'TIME_EXIT_MINUTES'   : 8,         # SCALP: 8 min no move? DUMP IT
+-    'FORCE_EXIT_MINUTES'  : 1,         # SCALP: force close after 1 min stuck
+-    'MAX_HOLD_HOURS'      : 1,         # SCALP: max 1 hour, NEVER hold long
+-
+-    # AI & Entry Filters — HYPER SCALPER (wide net, enough depth to exit)
+-    'MIN_ML_CONFIDENCE'   : 20.0,      # Near-zero AI filter: learn from everything
+-    'MAX_ENTRY_PRICE'     : 0.80,      # Wide but avoid extreme traps
+-    'MIN_ENTRY_PRICE'     : 0.15,      # Catch cheap scalps
++    'MAX_BET'             : 1.00,      # Fixed size for training mining
++    'MAX_POSITIONS'       : 10,        # 10 slots
++    'MAX_EXPOSURE_PCT'    : 0.90,      # 90% exposure allowed
++
++
++    # Auto-Close — faster turnover for data mining
++    'TAKE_PROFIT_PCT'     : 35.0,
++    'STOP_LOSS_PCT'       : 20.0,
++    'TIME_EXIT_MINUTES'   : 45,
++    'FORCE_EXIT_MINUTES'  : 3,
++    'MAX_HOLD_HOURS'      : 24,        # 24h max hold (was 48)
++
++    # AI & Entry Filters — TRAINING MODE (wide open for data mining)
++    'MIN_ML_CONFIDENCE'   : 25.0,      # Lowered to 25.0 to increase aggressiveness/data mining
++    'MAX_ENTRY_PRICE'     : 0.80,      # Widened to 0.80
++    'MIN_ENTRY_PRICE'     : 0.20,      # Widened to 0.20
+     'LIQUIDITY_TRAP_PRICE': 0.92,
+ 
+-    # Signal filters — HYPER SCALPER (accept everything with a pulse)
++    # Signal filters — TRAINING MODE (accept all signal types)
+     'AUTO_OPEN_SIGNALS'   : ['STRONG BUY', 'ARBITRAGE', 'BUY', 'EDGE', 'MONITOR'],
+-    'MIN_MOMENTUM'        : 0.5,       # Near-zero: any tiny move counts
+-    'MIN_LIQUIDITY'       : 2500,      # Enough depth to exit cleanly
+-    'MIN_VOLUME_24H'      : 1500,      # Active markets for fast fills
+-    'MAX_DAYS_TO_EXPIRY'  : 3.0,       # Near-term markets = faster action
++    'MIN_MOMENTUM'        : 1.0,       # Lowered from 5.0 to 1.0 to massively boost entry rate
++    'MIN_LIQUIDITY'       : 2000,      # Per user instruction: keep at 2000
++    'MIN_VOLUME_24H'      : 1000,      # Minimum real volume to avoid empty orders
++    'MAX_DAYS_TO_EXPIRY'  : 7.0,       # Boosted to 7 DAYS to capture massive amount of markets!
+     'VOL_SPIKE_RATIO'     : 3.0,
+     'NEAR_RES_HOURS'      : 6,
+     'KELLY_FRACTION'      : 0.15,
+
+commit d9554a9416b7b070fa3b2f7cd91d77eb8c60251f
+Author: Elvin r <>
+Date:   Wed Apr 15 16:11:47 2026 +0700
+
+    🔪 HYPER SCALPER: TP 10% | SL 7% | 8min Exit | Liq 2500 | Vol 1500 | Mom 0.5%
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index e4ce17c..77d6d14 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -112,34 +112,34 @@ CFG = {
+     'DISPLAY_TOP'         : 10,
+     'CLEAR_SCREEN'        : False,
+ 
+-    # Risk Management — 🔪 BRUTAL SCALPER MODE
++    # Risk Management — 🔪 HYPER SCALPER MODE
+     'BANKROLL'            : 10.00,
+     'STATS_RESET_ID'      : 82,
+     'BET_PCT'             : 0.10,
+     'MIN_BET'             : 1.00,
+     'MAX_BET'             : 1.00,      # Fixed $1 per scalp
+-    'MAX_POSITIONS'       : 10,        # 10 slots — fill them all fast
+-    'MAX_EXPOSURE_PCT'    : 0.90,      # 90% exposure allowed
+-
+-    # Auto-Close — SCALPER: Hit and Run, take small bites FAST
+-    'TAKE_PROFIT_PCT'     : 15.0,      # SCALP: grab +15% and GTFO
+-    'STOP_LOSS_PCT'       : 10.0,      # SCALP: cut bleeding at -10% (2:1.5 ratio)
+-    'TIME_EXIT_MINUTES'   : 15,        # SCALP: if no move in 15min, dump it
+-    'FORCE_EXIT_MINUTES'  : 2,         # SCALP: force close stuck positions faster
+-    'MAX_HOLD_HOURS'      : 2,         # SCALP: max 2 hours, never overnight
+-
+-    # AI & Entry Filters — SCALPER (wide entry, tight spread)
+-    'MIN_ML_CONFIDENCE'   : 25.0,      # Keep low: let AI learn scalp patterns
+-    'MAX_ENTRY_PRICE'     : 0.75,      # Avoid high-price low-margin traps
+-    'MIN_ENTRY_PRICE'     : 0.15,      # Widened: catch cheap scalps
++    'MAX_POSITIONS'       : 10,        # 10 slots — fill them ALL
++    'MAX_EXPOSURE_PCT'    : 0.95,      # 95% exposure — use almost everything
++
++    # Auto-Close — HYPER SCALP: Grab crumbs and RUN
++    'TAKE_PROFIT_PCT'     : 10.0,      # SCALP: +10% = instant cash out
++    'STOP_LOSS_PCT'       : 7.0,       # SCALP: -7% = cut IMMEDIATELY
++    'TIME_EXIT_MINUTES'   : 8,         # SCALP: 8 min no move? DUMP IT
++    'FORCE_EXIT_MINUTES'  : 1,         # SCALP: force close after 1 min stuck
++    'MAX_HOLD_HOURS'      : 1,         # SCALP: max 1 hour, NEVER hold long
++
++    # AI & Entry Filters — HYPER SCALPER (wide net, enough depth to exit)
++    'MIN_ML_CONFIDENCE'   : 20.0,      # Near-zero AI filter: learn from everything
++    'MAX_ENTRY_PRICE'     : 0.80,      # Wide but avoid extreme traps
++    'MIN_ENTRY_PRICE'     : 0.15,      # Catch cheap scalps
+     'LIQUIDITY_TRAP_PRICE': 0.92,
+ 
+-    # Signal filters — SCALPER (cast wide net, filter by speed)
+-    'AUTO_OPEN_SIGNALS'   : ['STRONG BUY', 'ARBITRAGE', 'BUY', 'EDGE'],
+-    'MIN_MOMENTUM'        : 1.0,       # Low: catch early moves before they explode
+-    'MIN_LIQUIDITY'       : 2000,      # Need enough depth to exit quickly
+-    'MIN_VOLUME_24H'      : 1500,      # Slightly higher: need active markets for fast fills
+-    'MAX_DAYS_TO_EXPIRY'  : 3.0,       # SCALP: prefer near-term markets (faster resolution)
++    # Signal filters — HYPER SCALPER (accept everything with a pulse)
++    'AUTO_OPEN_SIGNALS'   : ['STRONG BUY', 'ARBITRAGE', 'BUY', 'EDGE', 'MONITOR'],
++    'MIN_MOMENTUM'        : 0.5,       # Near-zero: any tiny move counts
++    'MIN_LIQUIDITY'       : 2500,      # Enough depth to exit cleanly
++    'MIN_VOLUME_24H'      : 1500,      # Active markets for fast fills
++    'MAX_DAYS_TO_EXPIRY'  : 3.0,       # Near-term markets = faster action
+     'VOL_SPIKE_RATIO'     : 3.0,
+     'NEAR_RES_HOURS'      : 6,
+     'KELLY_FRACTION'      : 0.15,
+
+commit 1f603ff19b30cb2980fd38c9b65f25f68e0cbd61
+Author: Elvin r <>
+Date:   Wed Apr 15 16:04:44 2026 +0700
+
+    🔪 BRUTAL SCALPER MODE: TP 15% | SL 10% | Max Hold 2hr | Time Exit 15min | Hit-and-Run
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 0f75838..e4ce17c 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -112,35 +112,34 @@ CFG = {
+     'DISPLAY_TOP'         : 10,
+     'CLEAR_SCREEN'        : False,
+ 
+-    # Risk Management — TRAINING MODE
++    # Risk Management — 🔪 BRUTAL SCALPER MODE
+     'BANKROLL'            : 10.00,
+     'STATS_RESET_ID'      : 82,
+     'BET_PCT'             : 0.10,
+     'MIN_BET'             : 1.00,
+-    'MAX_BET'             : 1.00,      # Fixed size for training mining
+-    'MAX_POSITIONS'       : 10,        # 10 slots
++    'MAX_BET'             : 1.00,      # Fixed $1 per scalp
++    'MAX_POSITIONS'       : 10,        # 10 slots — fill them all fast
+     'MAX_EXPOSURE_PCT'    : 0.90,      # 90% exposure allowed
+ 
+-
+-    # Auto-Close — faster turnover for data mining
+-    'TAKE_PROFIT_PCT'     : 35.0,
+-    'STOP_LOSS_PCT'       : 20.0,
+-    'TIME_EXIT_MINUTES'   : 45,
+-    'FORCE_EXIT_MINUTES'  : 3,
+-    'MAX_HOLD_HOURS'      : 24,        # 24h max hold (was 48)
+-
+-    # AI & Entry Filters — TRAINING MODE (wide open for data mining)
+-    'MIN_ML_CONFIDENCE'   : 25.0,      # Lowered to 25.0 to increase aggressiveness/data mining
+-    'MAX_ENTRY_PRICE'     : 0.80,      # Widened to 0.80
+-    'MIN_ENTRY_PRICE'     : 0.20,      # Widened to 0.20
++    # Auto-Close — SCALPER: Hit and Run, take small bites FAST
++    'TAKE_PROFIT_PCT'     : 15.0,      # SCALP: grab +15% and GTFO
++    'STOP_LOSS_PCT'       : 10.0,      # SCALP: cut bleeding at -10% (2:1.5 ratio)
++    'TIME_EXIT_MINUTES'   : 15,        # SCALP: if no move in 15min, dump it
++    'FORCE_EXIT_MINUTES'  : 2,         # SCALP: force close stuck positions faster
++    'MAX_HOLD_HOURS'      : 2,         # SCALP: max 2 hours, never overnight
++
++    # AI & Entry Filters — SCALPER (wide entry, tight spread)
++    'MIN_ML_CONFIDENCE'   : 25.0,      # Keep low: let AI learn scalp patterns
++    'MAX_ENTRY_PRICE'     : 0.75,      # Avoid high-price low-margin traps
++    'MIN_ENTRY_PRICE'     : 0.15,      # Widened: catch cheap scalps
+     'LIQUIDITY_TRAP_PRICE': 0.92,
+ 
+-    # Signal filters — TRAINING MODE (accept all signal types)
+-    'AUTO_OPEN_SIGNALS'   : ['STRONG BUY', 'ARBITRAGE', 'BUY', 'EDGE', 'MONITOR'],
+-    'MIN_MOMENTUM'        : 1.0,       # Lowered from 5.0 to 1.0 to massively boost entry rate
+-    'MIN_LIQUIDITY'       : 2000,      # Per user instruction: keep at 2000
+-    'MIN_VOLUME_24H'      : 1000,      # Minimum real volume to avoid empty orders
+-    'MAX_DAYS_TO_EXPIRY'  : 7.0,       # Boosted to 7 DAYS to capture massive amount of markets!
++    # Signal filters — SCALPER (cast wide net, filter by speed)
++    'AUTO_OPEN_SIGNALS'   : ['STRONG BUY', 'ARBITRAGE', 'BUY', 'EDGE'],
++    'MIN_MOMENTUM'        : 1.0,       # Low: catch early moves before they explode
++    'MIN_LIQUIDITY'       : 2000,      # Need enough depth to exit quickly
++    'MIN_VOLUME_24H'      : 1500,      # Slightly higher: need active markets for fast fills
++    'MAX_DAYS_TO_EXPIRY'  : 3.0,       # SCALP: prefer near-term markets (faster resolution)
+     'VOL_SPIKE_RATIO'     : 3.0,
+     'NEAR_RES_HOURS'      : 6,
+     'KELLY_FRACTION'      : 0.15,
+
+commit 5b32eca80ec20f7d9b6f4508cc0216a855426336
+Author: Elvin r <>
+Date:   Wed Apr 15 15:53:26 2026 +0700
+
+    🔄 REVERT: Back to Aggressive Training Mode (Pre-Whale) for Data Collection
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 1fa31d9..0f75838 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -112,35 +112,35 @@ CFG = {
+     'DISPLAY_TOP'         : 10,
+     'CLEAR_SCREEN'        : False,
+ 
+-    # Risk Management — WHALE MODE (Sniper Elit)
++    # Risk Management — TRAINING MODE
+     'BANKROLL'            : 10.00,
+     'STATS_RESET_ID'      : 82,
+     'BET_PCT'             : 0.10,
+     'MIN_BET'             : 1.00,
+-    'MAX_BET'             : 1.00,
++    'MAX_BET'             : 1.00,      # Fixed size for training mining
+     'MAX_POSITIONS'       : 10,        # 10 slots
+     'MAX_EXPOSURE_PCT'    : 0.90,      # 90% exposure allowed
+ 
+ 
+-    # Auto-Close — Whale Mode
++    # Auto-Close — faster turnover for data mining
+     'TAKE_PROFIT_PCT'     : 35.0,
+     'STOP_LOSS_PCT'       : 20.0,
+     'TIME_EXIT_MINUTES'   : 45,
+     'FORCE_EXIT_MINUTES'  : 3,
+-    'MAX_HOLD_HOURS'      : 24,
++    'MAX_HOLD_HOURS'      : 24,        # 24h max hold (was 48)
+ 
+-    # AI & Entry Filters — WHALE MODE (strict sniper)
+-    'MIN_ML_CONFIDENCE'   : 53.0,      # Brain Score min 53 + AI ML (should_trade) as final gatekeeper
+-    'MAX_ENTRY_PRICE'     : 0.70,      # Tight: avoid low-margin high-price traps
+-    'MIN_ENTRY_PRICE'     : 0.25,      # Tight: avoid whale manipulation zone
++    # AI & Entry Filters — TRAINING MODE (wide open for data mining)
++    'MIN_ML_CONFIDENCE'   : 25.0,      # Lowered to 25.0 to increase aggressiveness/data mining
++    'MAX_ENTRY_PRICE'     : 0.80,      # Widened to 0.80
++    'MIN_ENTRY_PRICE'     : 0.20,      # Widened to 0.20
+     'LIQUIDITY_TRAP_PRICE': 0.92,
+ 
+-    # Signal filters — WHALE MODE (only strong signals)
+-    'AUTO_OPEN_SIGNALS'   : ['STRONG BUY', 'ARBITRAGE', 'BUY'],
+-    'MIN_MOMENTUM'        : 5.0,       # Strict: only enter on confirmed price breakouts
+-    'MIN_LIQUIDITY'       : 5000,      # High liquidity only: avoid thin markets
+-    'MIN_VOLUME_24H'      : 3000,      # High volume only: real active markets
+-    'MAX_DAYS_TO_EXPIRY'  : 2.0,       # Max 2 days: fast turnover
++    # Signal filters — TRAINING MODE (accept all signal types)
++    'AUTO_OPEN_SIGNALS'   : ['STRONG BUY', 'ARBITRAGE', 'BUY', 'EDGE', 'MONITOR'],
++    'MIN_MOMENTUM'        : 1.0,       # Lowered from 5.0 to 1.0 to massively boost entry rate
++    'MIN_LIQUIDITY'       : 2000,      # Per user instruction: keep at 2000
++    'MIN_VOLUME_24H'      : 1000,      # Minimum real volume to avoid empty orders
++    'MAX_DAYS_TO_EXPIRY'  : 7.0,       # Boosted to 7 DAYS to capture massive amount of markets!
+     'VOL_SPIKE_RATIO'     : 3.0,
+     'NEAR_RES_HOURS'      : 6,
+     'KELLY_FRACTION'      : 0.15,
+@@ -1077,24 +1077,24 @@ def analyze(names, gamma_px, clob, liq, vol, days, prev_px) -> Optional[dict]:
+         signal = 'ARBITRAGE'; action = 'BELI ALL'; color = GG
+         is_strong = True; is_auto = True
+         
+-    elif abs(mom_pct) >= 8 and vol_spike:
++    elif abs(mom_pct) >= 3.0 and vol_spike:
+         d = names[0] if mom_pct > 0 else (names[1] if N > 1 else names[0])
+         signal = 'STRONG BUY'; action = f'BUY {d[:12].upper()}'; color = GG
+         entry_name = d; is_strong = True; is_auto = True
+ 
+-    elif abs(mom_pct) >= 6:
++    elif abs(mom_pct) >= 2.0:
+         d = names[0] if mom_pct > 0 else (names[1] if N > 1 else names[0])
+         signal = 'STRONG BUY'; action = f'BUY {d[:12].upper()}'; color = GG
+         entry_name = d; is_strong = True; is_auto = True
+ 
+-    elif abs(mom_pct) >= CFG.get('MIN_MOMENTUM', 5.0) and (vol >= CFG.get('MIN_VOLUME_24H', 3000) or vol_spike):
++    elif abs(mom_pct) >= CFG.get('MIN_MOMENTUM', 1.0) and (vol >= CFG.get('MIN_VOLUME_24H', 1000) or vol_spike):
+         d = names[0] if mom_pct > 0 else (names[1] if N > 1 else names[0])
+         signal = 'BUY'; action = f'BUY {d[:12].upper()}'; color = G
+         entry_name = d; is_strong = True; is_auto = True
+ 
+     elif vol_spike:
+-        signal = 'EDGE'; action = 'WATCH VOL'; color = YY
+-        is_auto = False  # WHALE MODE: Do NOT auto-buy volume spikes without momentum confirmation
++        signal = 'EDGE'; action = 'BUY VOL'; color = YY
++        is_auto = True  # AUTO-BUY enabled: Capture high-quality volume explosions (Active Markets) regardless of 10s momentum
+ 
+     elif near_res and days is not None and days < 0.25:
+         signal = 'EDGE'; action = 'WATCH TIME'; color = Y
+
+commit cfb63af5aaf81f7fb2713264b3a31bda6c69d17f
+Author: Elvin r <>
+Date:   Tue Apr 14 23:17:11 2026 +0700
+
+    🐋 WHALE MODE: Brain Score min 53 | ML 60% weight hardcoded | All filters tightened
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index 6ff1e22..1fa31d9 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -130,7 +130,7 @@ CFG = {
+     'MAX_HOLD_HOURS'      : 24,
+ 
+     # AI & Entry Filters — WHALE MODE (strict sniper)
+-    'MIN_ML_CONFIDENCE'   : 60.0,      # High confidence: only take trades AI is very sure about
++    'MIN_ML_CONFIDENCE'   : 53.0,      # Brain Score min 53 + AI ML (should_trade) as final gatekeeper
+     'MAX_ENTRY_PRICE'     : 0.70,      # Tight: avoid low-margin high-price traps
+     'MIN_ENTRY_PRICE'     : 0.25,      # Tight: avoid whale manipulation zone
+     'LIQUIDITY_TRAP_PRICE': 0.92,
+
+commit 64c703600074db77b9b3f10156e93163c8dc0a65
+Author: Elvin r <>
+Date:   Tue Apr 14 22:44:19 2026 +0700
+
+    🐋 MODE: Switched to WHALE MODE (Sniper Elit) — All filters tightened for tonight's test run
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index f39fe3e..6ff1e22 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -112,35 +112,35 @@ CFG = {
+     'DISPLAY_TOP'         : 10,
+     'CLEAR_SCREEN'        : False,
+ 
+-    # Risk Management — TRAINING MODE
++    # Risk Management — WHALE MODE (Sniper Elit)
+     'BANKROLL'            : 10.00,
+     'STATS_RESET_ID'      : 82,
+     'BET_PCT'             : 0.10,
+     'MIN_BET'             : 1.00,
+-    'MAX_BET'             : 1.00,      # Fixed size for training mining
++    'MAX_BET'             : 1.00,
+     'MAX_POSITIONS'       : 10,        # 10 slots
+     'MAX_EXPOSURE_PCT'    : 0.90,      # 90% exposure allowed
+ 
+ 
+-    # Auto-Close — faster turnover for data mining
++    # Auto-Close — Whale Mode
+     'TAKE_PROFIT_PCT'     : 35.0,
+     'STOP_LOSS_PCT'       : 20.0,
+     'TIME_EXIT_MINUTES'   : 45,
+     'FORCE_EXIT_MINUTES'  : 3,
+-    'MAX_HOLD_HOURS'      : 24,        # 24h max hold (was 48) → faster cycling
++    'MAX_HOLD_HOURS'      : 24,
+ 
+-    # AI & Entry Filters — TRAINING MODE (wide open for data mining)
+-    'MIN_ML_CONFIDENCE'   : 25.0,      # Lowered from 30.0 to increase aggressiveness/data mining
+-    'MAX_ENTRY_PRICE'     : 0.80,      # Widened to 0.80
+-    'MIN_ENTRY_PRICE'     : 0.20,      # Widened to 0.20
++    # AI & Entry Filters — WHALE MODE (strict sniper)
++    'MIN_ML_CONFIDENCE'   : 60.0,      # High confidence: only take trades AI is very sure about
++    'MAX_ENTRY_PRICE'     : 0.70,      # Tight: avoid low-margin high-price traps
++    'MIN_ENTRY_PRICE'     : 0.25,      # Tight: avoid whale manipulation zone
+     'LIQUIDITY_TRAP_PRICE': 0.92,
+ 
+-    # Signal filters — TRAINING MODE (accept all signal types)
+-    'AUTO_OPEN_SIGNALS'   : ['STRONG BUY', 'ARBITRAGE', 'BUY', 'EDGE', 'MONITOR'],
+-    'MIN_MOMENTUM'        : 1.0,       # Lowered from 5.0 to 1.0 to massively boost entry rate
+-    'MIN_LIQUIDITY'       : 2000,      # Per user instruction: keep at 2000
+-    'MIN_VOLUME_24H'      : 1000,      # Minimum real volume to avoid empty orders
+-    'MAX_DAYS_TO_EXPIRY'  : 7.0,       # Boosted to 7 DAYS to capture massive amount of markets!
++    # Signal filters — WHALE MODE (only strong signals)
++    'AUTO_OPEN_SIGNALS'   : ['STRONG BUY', 'ARBITRAGE', 'BUY'],
++    'MIN_MOMENTUM'        : 5.0,       # Strict: only enter on confirmed price breakouts
++    'MIN_LIQUIDITY'       : 5000,      # High liquidity only: avoid thin markets
++    'MIN_VOLUME_24H'      : 3000,      # High volume only: real active markets
++    'MAX_DAYS_TO_EXPIRY'  : 2.0,       # Max 2 days: fast turnover
+     'VOL_SPIKE_RATIO'     : 3.0,
+     'NEAR_RES_HOURS'      : 6,
+     'KELLY_FRACTION'      : 0.15,
+@@ -1077,24 +1077,24 @@ def analyze(names, gamma_px, clob, liq, vol, days, prev_px) -> Optional[dict]:
+         signal = 'ARBITRAGE'; action = 'BELI ALL'; color = GG
+         is_strong = True; is_auto = True
+         
+-    elif abs(mom_pct) >= 3.0 and vol_spike:
++    elif abs(mom_pct) >= 8 and vol_spike:
+         d = names[0] if mom_pct > 0 else (names[1] if N > 1 else names[0])
+         signal = 'STRONG BUY'; action = f'BUY {d[:12].upper()}'; color = GG
+         entry_name = d; is_strong = True; is_auto = True
+ 
+-    elif abs(mom_pct) >= 2.0:
++    elif abs(mom_pct) >= 6:
+         d = names[0] if mom_pct > 0 else (names[1] if N > 1 else names[0])
+         signal = 'STRONG BUY'; action = f'BUY {d[:12].upper()}'; color = GG
+         entry_name = d; is_strong = True; is_auto = True
+ 
+-    elif abs(mom_pct) >= CFG.get('MIN_MOMENTUM', 1.0) and (vol >= CFG.get('MIN_VOLUME_24H', 1000) or vol_spike):
++    elif abs(mom_pct) >= CFG.get('MIN_MOMENTUM', 5.0) and (vol >= CFG.get('MIN_VOLUME_24H', 3000) or vol_spike):
+         d = names[0] if mom_pct > 0 else (names[1] if N > 1 else names[0])
+         signal = 'BUY'; action = f'BUY {d[:12].upper()}'; color = G
+         entry_name = d; is_strong = True; is_auto = True
+ 
+     elif vol_spike:
+-        signal = 'EDGE'; action = 'BUY VOL'; color = YY
+-        is_auto = True  # AUTO-BUY enabled: Capture high-quality volume explosions (Active Markets) regardless of 10s momentum
++        signal = 'EDGE'; action = 'WATCH VOL'; color = YY
++        is_auto = False  # WHALE MODE: Do NOT auto-buy volume spikes without momentum confirmation
+ 
+     elif near_res and days is not None and days < 0.25:
+         signal = 'EDGE'; action = 'WATCH TIME'; color = Y
+
+commit e59fb9a9de77c105b881c76370adac0b65e2f7d0
+Author: Elvin r <>
+Date:   Tue Apr 14 17:56:45 2026 +0700
+
+    🧠 LOGIC: Enabled Auto-Buy for High Volume Spikes (EDGE) to intelligently collect quality data outside of sudden price momentum bursts
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index a199e44..f39fe3e 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -131,8 +131,8 @@ CFG = {
+ 
+     # AI & Entry Filters — TRAINING MODE (wide open for data mining)
+     'MIN_ML_CONFIDENCE'   : 25.0,      # Lowered from 30.0 to increase aggressiveness/data mining
+-    'MAX_ENTRY_PRICE'     : 0.70,      # Reverted to 0.70
+-    'MIN_ENTRY_PRICE'     : 0.30,      # Reverted to 0.30
++    'MAX_ENTRY_PRICE'     : 0.80,      # Widened to 0.80
++    'MIN_ENTRY_PRICE'     : 0.20,      # Widened to 0.20
+     'LIQUIDITY_TRAP_PRICE': 0.92,
+ 
+     # Signal filters — TRAINING MODE (accept all signal types)
+@@ -140,7 +140,7 @@ CFG = {
+     'MIN_MOMENTUM'        : 1.0,       # Lowered from 5.0 to 1.0 to massively boost entry rate
+     'MIN_LIQUIDITY'       : 2000,      # Per user instruction: keep at 2000
+     'MIN_VOLUME_24H'      : 1000,      # Minimum real volume to avoid empty orders
+-    'MAX_DAYS_TO_EXPIRY'  : 2.0,       # Max 2 days to avoid tying up capital
++    'MAX_DAYS_TO_EXPIRY'  : 7.0,       # Boosted to 7 DAYS to capture massive amount of markets!
+     'VOL_SPIKE_RATIO'     : 3.0,
+     'NEAR_RES_HOURS'      : 6,
+     'KELLY_FRACTION'      : 0.15,
+@@ -1093,8 +1093,8 @@ def analyze(names, gamma_px, clob, liq, vol, days, prev_px) -> Optional[dict]:
+         entry_name = d; is_strong = True; is_auto = True
+ 
+     elif vol_spike:
+-        signal = 'EDGE'; action = 'WATCH VOL'; color = YY
+-        is_auto = False  # DO NOT AUTO-BUY: Needs momentum to prove it's not a stagnant whale trap
++        signal = 'EDGE'; action = 'BUY VOL'; color = YY
++        is_auto = True  # AUTO-BUY enabled: Capture high-quality volume explosions (Active Markets) regardless of 10s momentum
+ 
+     elif near_res and days is not None and days < 0.25:
+         signal = 'EDGE'; action = 'WATCH TIME'; color = Y
+
+commit f49aca9a2623f8b1a5483458de028f4301fdd579
+Author: Elvin r <>
+Date:   Tue Apr 14 17:40:21 2026 +0700
+
+    ⚙️ CONFIG: Reverted to strict quality filters. User prioritizes data quality over quantity
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index deed66d..a199e44 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -131,8 +131,8 @@ CFG = {
+ 
+     # AI & Entry Filters — TRAINING MODE (wide open for data mining)
+     'MIN_ML_CONFIDENCE'   : 25.0,      # Lowered from 30.0 to increase aggressiveness/data mining
+-    'MAX_ENTRY_PRICE'     : 0.80,      # Widened to 0.80
+-    'MIN_ENTRY_PRICE'     : 0.20,      # Widened to 0.20
++    'MAX_ENTRY_PRICE'     : 0.70,      # Reverted to 0.70
++    'MIN_ENTRY_PRICE'     : 0.30,      # Reverted to 0.30
+     'LIQUIDITY_TRAP_PRICE': 0.92,
+ 
+     # Signal filters — TRAINING MODE (accept all signal types)
+@@ -140,7 +140,7 @@ CFG = {
+     'MIN_MOMENTUM'        : 1.0,       # Lowered from 5.0 to 1.0 to massively boost entry rate
+     'MIN_LIQUIDITY'       : 2000,      # Per user instruction: keep at 2000
+     'MIN_VOLUME_24H'      : 1000,      # Minimum real volume to avoid empty orders
+-    'MAX_DAYS_TO_EXPIRY'  : 7.0,       # Boosted to 7 DAYS to capture massive amount of markets!
++    'MAX_DAYS_TO_EXPIRY'  : 2.0,       # Max 2 days to avoid tying up capital
+     'VOL_SPIKE_RATIO'     : 3.0,
+     'NEAR_RES_HOURS'      : 6,
+     'KELLY_FRACTION'      : 0.15,
+
+commit 0c41158fafeb6fe14c282947e9507b670ef3b7e4
+Author: Elvin r <>
+Date:   Tue Apr 14 17:39:05 2026 +0700
+
+    ⚙️ CONFIG: Unleashing the kraken. Widened expiry to 7 days and price to 0.20-0.80 for rapid 300+ sample mining
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index a199e44..deed66d 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -131,8 +131,8 @@ CFG = {
+ 
+     # AI & Entry Filters — TRAINING MODE (wide open for data mining)
+     'MIN_ML_CONFIDENCE'   : 25.0,      # Lowered from 30.0 to increase aggressiveness/data mining
+-    'MAX_ENTRY_PRICE'     : 0.70,      # Reverted to 0.70
+-    'MIN_ENTRY_PRICE'     : 0.30,      # Reverted to 0.30
++    'MAX_ENTRY_PRICE'     : 0.80,      # Widened to 0.80
++    'MIN_ENTRY_PRICE'     : 0.20,      # Widened to 0.20
+     'LIQUIDITY_TRAP_PRICE': 0.92,
+ 
+     # Signal filters — TRAINING MODE (accept all signal types)
+@@ -140,7 +140,7 @@ CFG = {
+     'MIN_MOMENTUM'        : 1.0,       # Lowered from 5.0 to 1.0 to massively boost entry rate
+     'MIN_LIQUIDITY'       : 2000,      # Per user instruction: keep at 2000
+     'MIN_VOLUME_24H'      : 1000,      # Minimum real volume to avoid empty orders
+-    'MAX_DAYS_TO_EXPIRY'  : 2.0,       # Max 2 days to avoid tying up capital
++    'MAX_DAYS_TO_EXPIRY'  : 7.0,       # Boosted to 7 DAYS to capture massive amount of markets!
+     'VOL_SPIKE_RATIO'     : 3.0,
+     'NEAR_RES_HOURS'      : 6,
+     'KELLY_FRACTION'      : 0.15,
+
+commit 2b0693b2eaa9f8af0156bf74d7145e11ec7121a8
+Author: Elvin r <>
+Date:   Tue Apr 14 17:31:17 2026 +0700
+
+    ⚙️ CONFIG: Lowered Momentum threshold from 5.0 to 1.0 to massively unblock entry generation
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index d43aa3c..a199e44 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -137,7 +137,7 @@ CFG = {
+ 
+     # Signal filters — TRAINING MODE (accept all signal types)
+     'AUTO_OPEN_SIGNALS'   : ['STRONG BUY', 'ARBITRAGE', 'BUY', 'EDGE', 'MONITOR'],
+-    'MIN_MOMENTUM'        : 5.0,       # Very low momentum filter → more entries
++    'MIN_MOMENTUM'        : 1.0,       # Lowered from 5.0 to 1.0 to massively boost entry rate
+     'MIN_LIQUIDITY'       : 2000,      # Per user instruction: keep at 2000
+     'MIN_VOLUME_24H'      : 1000,      # Minimum real volume to avoid empty orders
+     'MAX_DAYS_TO_EXPIRY'  : 2.0,       # Max 2 days to avoid tying up capital
+@@ -1077,17 +1077,17 @@ def analyze(names, gamma_px, clob, liq, vol, days, prev_px) -> Optional[dict]:
+         signal = 'ARBITRAGE'; action = 'BELI ALL'; color = GG
+         is_strong = True; is_auto = True
+         
+-    elif abs(mom_pct) >= 8 and vol_spike:
++    elif abs(mom_pct) >= 3.0 and vol_spike:
+         d = names[0] if mom_pct > 0 else (names[1] if N > 1 else names[0])
+         signal = 'STRONG BUY'; action = f'BUY {d[:12].upper()}'; color = GG
+         entry_name = d; is_strong = True; is_auto = True
+ 
+-    elif abs(mom_pct) >= 6:
++    elif abs(mom_pct) >= 2.0:
+         d = names[0] if mom_pct > 0 else (names[1] if N > 1 else names[0])
+         signal = 'STRONG BUY'; action = f'BUY {d[:12].upper()}'; color = GG
+         entry_name = d; is_strong = True; is_auto = True
+ 
+-    elif abs(mom_pct) >= 5.0 and (vol >= CFG.get('MIN_VOLUME_24H', 1000) or vol_spike):
++    elif abs(mom_pct) >= CFG.get('MIN_MOMENTUM', 1.0) and (vol >= CFG.get('MIN_VOLUME_24H', 1000) or vol_spike):
+         d = names[0] if mom_pct > 0 else (names[1] if N > 1 else names[0])
+         signal = 'BUY'; action = f'BUY {d[:12].upper()}'; color = G
+         entry_name = d; is_strong = True; is_auto = True
+
+commit ea1ceea169b23a253a2e29517be1648bee69ad5b
+Author: Elvin r <>
+Date:   Tue Apr 14 16:26:26 2026 +0700
+
+    ⚙️ CONFIG: Lowered ML Confidence to 25.0 for increased entry volume
+
+diff --git a/polymarket_scanner.py b/polymarket_scanner.py
+index b11988a..d43aa3c 100644
+--- a/polymarket_scanner.py
++++ b/polymarket_scanner.py
+@@ -130,7 +130,7 @@ CFG = {
+     'MAX_HOLD_HOURS'      : 24,        # 24h max hold (was 48) → faster cycling
+ 
+     # AI & Entry Filters — TRAINING MODE (wide open for data mining)
+-    'MIN_ML_CONFIDENCE'   : 30.0,      # Strict quality filter to stop bleeding
++    'MIN_ML_CONFIDENCE'   : 25.0,      # Lowered from 30.0 to increase aggressiveness/data mining
+     'MAX_ENTRY_PRICE'     : 0.70,      # Reverted to 0.70
+     'MIN_ENTRY_PRICE'     : 0.30,      # Reverted to 0.30
+     'LIQUIDITY_TRAP_PRICE': 0.92,

@@ -1,0 +1,276 @@
+======================================================================
+  KALIMASADA v7 — MULTI-SCENARIO BACKTEST (LONG + SHORT)
+  6 Skenario: 2 Periode x 3 Modal
+  LONG: Ascending Triangle | SHORT: Descending Triangle
+======================================================================
+OK Terhubung ke GATE
+
+   Downloading 63 koin...
+   [01/63] BTC/USDT           H1=999 H4=999 D1=294
+   [02/63] ETH/USDT           H1=999 H4=999 D1=294
+   [03/63] SOL/USDT           H1=999 H4=999 D1=294
+   [04/63] XRP/USDT           H1=999 H4=999 D1=294
+   [05/63] DOGE/USDT          H1=999 H4=999 D1=294
+   [06/63] ADA/USDT           H1=999 H4=999 D1=294
+   [07/63] AVAX/USDT          H1=999 H4=999 D1=294
+   [08/63] DOT/USDT           H1=999 H4=999 D1=294
+   [09/63] LINK/USDT          H1=999 H4=999 D1=294
+   [10/63] NEAR/USDT          H1=999 H4=999 D1=294
+   [11/63] SUI/USDT           H1=999 H4=999 D1=294
+   [12/63] APT/USDT           H1=999 H4=999 D1=294
+   [13/63] ARB/USDT           H1=999 H4=999 D1=294
+   [14/63] OP/USDT            H1=999 H4=999 D1=294
+   [15/63] FIL/USDT           H1=999 H4=999 D1=294
+   [16/63] LTC/USDT           H1=999 H4=999 D1=294
+   [17/63] BCH/USDT           H1=999 H4=999 D1=294
+   [18/63] UNI/USDT           H1=999 H4=999 D1=294
+   [19/63] AAVE/USDT          H1=999 H4=999 D1=294
+   [20/63] ATOM/USDT          H1=999 H4=999 D1=294
+   [21/63] ALGO/USDT          H1=999 H4=999 D1=294
+   [22/63] SAND/USDT          H1=999 H4=999 D1=294
+   [23/63] MANA/USDT          H1=999 H4=999 D1=294
+   [24/63] GALA/USDT          H1=999 H4=999 D1=294
+   [25/63] IMX/USDT           H1=999 H4=999 D1=294
+   [26/63] LDO/USDT           H1=999 H4=999 D1=294
+   [27/63] CRV/USDT           H1=999 H4=999 D1=294
+   [28/63] PEPE/USDT          H1=999 H4=999 D1=294
+   [29/63] WIF/USDT           H1=999 H4=999 D1=294
+   [30/63] BONK/USDT          H1=999 H4=999 D1=294
+   [31/63] FLOKI/USDT         H1=999 H4=999 D1=294
+   [32/63] SHIB/USDT          H1=999 H4=999 D1=294
+   [33/63] TIA/USDT           H1=999 H4=999 D1=294
+   [34/63] SEI/USDT           H1=999 H4=999 D1=294
+   [35/63] INJ/USDT           H1=999 H4=999 D1=294
+   [36/63] ONDO/USDT          H1=999 H4=999 D1=294
+   [37/63] PENDLE/USDT        H1=999 H4=999 D1=294
+   [38/63] RENDER/USDT        H1=999 H4=999 D1=294
+   [39/63] FET/USDT           H1=999 H4=999 D1=294
+   [40/63] JASMY/USDT         H1=999 H4=999 D1=294
+   [41/63] CHZ/USDT           H1=999 H4=999 D1=294
+   [42/63] COMP/USDT          H1=999 H4=999 D1=294
+   [43/63] SNX/USDT           H1=999 H4=999 D1=294
+   [44/63] BLUR/USDT          H1=999 H4=999 D1=294
+   [45/63] RUNE/USDT          H1=999 H4=999 D1=294
+   [46/63] ICP/USDT           H1=999 H4=999 D1=294
+   [47/63] HBAR/USDT          H1=999 H4=999 D1=294
+   [48/63] VET/USDT           H1=999 H4=999 D1=294
+   [49/63] TRX/USDT           H1=999 H4=999 D1=294
+   [50/63] ETC/USDT           H1=999 H4=999 D1=294
+   [51/63] TAO/USDT           H1=999 H4=999 D1=294
+   [52/63] WLD/USDT           H1=999 H4=999 D1=294
+   [53/63] STRK/USDT          H1=999 H4=999 D1=294
+   [54/63] ARKM/USDT          H1=999 H4=999 D1=294
+   [55/63] SUPER/USDT         H1=999 H4=999 D1=294
+   [56/63] CORE/USDT          H1=999 H4=999 D1=294
+   [57/63] KAS/USDT           H1=999 H4=999 D1=294
+   [58/63] FARTCOIN/USDT      H1=999 H4=999 D1=294
+   [59/63] BNB/USDT           H1=999 H4=999 D1=294
+   [60/63] POL/USDT           H1=999 H4=999 D1=294
+   [61/63] IP/USDT            H1=999 H4=999 D1=294
+   [62/63] DASH/USDT          H1=999 H4=999 D1=294
+   [63/63] ZEC/USDT           H1=999 H4=999 D1=294
+
+   63 koin siap.
+
+
+──────────────────────────────────────────────────────────────────────
+  ▶ Scenario: Feb 2026 → Hari Ini | Modal $3.50
+    Start: 2026-02-01 | Modal: $3.50
+──────────────────────────────────────────────────────────────────────
+    Modal Awal  : $3.50
+    Modal Akhir : $2.7161
+    Net Profit  : $-0.7839 (-22.4%)
+    Max Drawdown: 24.8%
+    Total Trades: 26 (5W / 21L)
+    LONG Trades : 17 | SHORT Trades: 9
+    Win Rate    : 19.2%
+    Profit Fctr : 0.38
+    Total Fees  : $0.0370
+    Avg WIN     : +$0.0947
+    Avg LOSS    : -$0.0599
+    Exp Value   : $-0.0302/trade
+
+    Trade Log:
+      # Date     TF  Dir   Coin       Signal                 W/L      Entry         SL         TP        PnL
+      1 02-21    H4  SHORT ETH        SHORT_RESISTANCE_PUL   W   $1962.8100 $2036.0725 $1816.2850    +$0.077
+      2 03-09    H4  SHORT DOGE       SHORT_RESISTANCE_PUL   L   $   0.0913 $   0.0959 $   0.0821    -$0.055
+      3 03-15    H4  LONG  ADA        HL_TRENDLINE_TOUCH     W   $   0.2637 $   0.2524 $   0.2863    +$0.089
+      4 03-13    H4  LONG  DOT        HL_TRENDLINE_TOUCH     L   $   1.5080 $   1.4401 $   1.6437    -$0.050
+      5 02-21    H4  LONG  LINK       HL_TRENDLINE_TOUCH     L   $   8.9340 $   8.5299 $   9.7422    -$0.050
+      6 03-03    H4  LONG  FIL        HL_TRENDLINE_TOUCH     L   $   0.9998 $   0.9314 $   1.1366    -$0.074
+      7 03-09    H4  SHORT BCH        SHORT_RESISTANCE_PUL   L   $ 449.5500 $ 465.9750 $ 416.7000    -$0.039
+      8 03-06    H4  LONG  UNI        DEMAND_3X_RETEST       L   $   3.9320 $   3.6900 $   4.4159    -$0.064
+      9 02-09    H1  LONG  ALGO       HL_TRENDLINE_TOUCH     L   $   0.0958 $   0.0936 $   0.1003    -$0.025
+     10 03-06    H4  LONG  SAND       HL_TRENDLINE_TOUCH     L   $   0.0829 $   0.0775 $   0.0936    -$0.066
+     11 03-06    H4  LONG  MANA       HL_TRENDLINE_TOUCH     L   $   0.0959 $   0.0902 $   0.1074    -$0.060
+     12 02-07    H1  SHORT GALA       SHORT_RESISTANCE_PUL   W   $   0.0043 $   0.0044 $   0.0040    +$0.063
+     13 03-06    H4  LONG  LDO        HL_TRENDLINE_TOUCH     L   $   0.3090 $   0.2886 $   0.3499    -$0.066
+     14 03-10    H4  SHORT PEPE       SHORT_RESISTANCE_PUL   L   $   0.0000 $   0.0000 $   0.0000    -$0.076
+     15 03-05    H4  LONG  BONK       HL_TRENDLINE_TOUCH     L   $   0.0000 $   0.0000 $   0.0000    -$0.075
+     16 03-04    H4  SHORT FLOKI      SHORT_RESISTANCE_PUL   L   $   0.0000 $   0.0000 $   0.0000    -$0.074
+     17 03-10    H4  SHORT INJ        SHORT_RESISTANCE_PUL   L   $   2.9430 $   3.1169 $   2.5951    -$0.054
+     18 03-03    H4  LONG  PENDLE     DEMAND_3X_RETEST       L   $   1.2770 $   1.1809 $   1.4691    -$0.067
+     19 03-06    H4  LONG  RENDER     DEMAND_3X_RETEST       W   $   1.4192 $   1.3137 $   1.6302    +$0.125
+     20 03-05    H4  LONG  BLUR       HL_TRENDLINE_TOUCH     L   $   0.0197 $   0.0186 $   0.0218    -$0.050
+     21 02-12    H4  SHORT ICP        SHORT_RESISTANCE_PUL   L   $   2.3570 $   2.5309 $   2.0091    -$0.066
+     22 03-06    H4  LONG  ETC        HL_TRENDLINE_TOUCH     L   $   8.5130 $   7.9953 $   9.5484    -$0.053
+     23 03-06    H4  LONG  ARKM       HL_TRENDLINE_TOUCH     L   $   0.1061 $   0.0986 $   0.1211    -$0.060
+     24 02-13    H4  LONG  SUPER      DEMAND_3X_RETEST       W   $   0.1225 $   0.1135 $   0.1405    +$0.119
+     25 02-16    H4  LONG  KAS        HL_TRENDLINE_TOUCH     L   $   0.0318 $   0.0300 $   0.0354    -$0.050
+     26 02-15    H4  SHORT IP         SHORT_RESISTANCE_PUL   L   $   1.1770 $   1.2929 $   0.9452    -$0.084
+
+──────────────────────────────────────────────────────────────────────
+  ▶ Scenario: Feb 2026 → Hari Ini | Modal $10
+    Start: 2026-02-01 | Modal: $10.00
+──────────────────────────────────────────────────────────────────────
+    Modal Awal  : $10.00
+    Modal Akhir : $7.7602
+    Net Profit  : $-2.2398 (-22.4%)
+    Max Drawdown: 24.8%
+    Total Trades: 26 (5W / 21L)
+    LONG Trades : 17 | SHORT Trades: 9
+    Win Rate    : 19.2%
+    Profit Fctr : 0.38
+    Total Fees  : $0.1058
+    Avg WIN     : +$0.2705
+    Avg LOSS    : -$0.1711
+    Exp Value   : $-0.0861/trade
+
+    Trade Log:
+      # Date     TF  Dir   Coin       Signal                 W/L      Entry         SL         TP        PnL
+      1 02-21    H4  SHORT ETH        SHORT_RESISTANCE_PUL   W   $1962.8100 $2036.0725 $1816.2850    +$0.219
+      2 03-09    H4  SHORT DOGE       SHORT_RESISTANCE_PUL   L   $   0.0913 $   0.0959 $   0.0821    -$0.158
+      3 03-15    H4  LONG  ADA        HL_TRENDLINE_TOUCH     W   $   0.2637 $   0.2524 $   0.2863    +$0.255
+      4 03-13    H4  LONG  DOT        HL_TRENDLINE_TOUCH     L   $   1.5080 $   1.4401 $   1.6437    -$0.144
+      5 02-21    H4  LONG  LINK       HL_TRENDLINE_TOUCH     L   $   8.9340 $   8.5299 $   9.7422    -$0.143
+      6 03-03    H4  LONG  FIL        HL_TRENDLINE_TOUCH     L   $   0.9998 $   0.9314 $   1.1366    -$0.210
+      7 03-09    H4  SHORT BCH        SHORT_RESISTANCE_PUL   L   $ 449.5500 $ 465.9750 $ 416.7000    -$0.112
+      8 03-06    H4  LONG  UNI        DEMAND_3X_RETEST       L   $   3.9320 $   3.6900 $   4.4159    -$0.184
+      9 02-09    H1  LONG  ALGO       HL_TRENDLINE_TOUCH     L   $   0.0958 $   0.0936 $   0.1003    -$0.072
+     10 03-06    H4  LONG  SAND       HL_TRENDLINE_TOUCH     L   $   0.0829 $   0.0775 $   0.0936    -$0.188
+     11 03-06    H4  LONG  MANA       HL_TRENDLINE_TOUCH     L   $   0.0959 $   0.0902 $   0.1074    -$0.170
+     12 02-07    H1  SHORT GALA       SHORT_RESISTANCE_PUL   W   $   0.0043 $   0.0044 $   0.0040    +$0.181
+     13 03-06    H4  LONG  LDO        HL_TRENDLINE_TOUCH     L   $   0.3090 $   0.2886 $   0.3499    -$0.188
+     14 03-10    H4  SHORT PEPE       SHORT_RESISTANCE_PUL   L   $   0.0000 $   0.0000 $   0.0000    -$0.217
+     15 03-05    H4  LONG  BONK       HL_TRENDLINE_TOUCH     L   $   0.0000 $   0.0000 $   0.0000    -$0.213
+     16 03-04    H4  SHORT FLOKI      SHORT_RESISTANCE_PUL   L   $   0.0000 $   0.0000 $   0.0000    -$0.211
+     17 03-10    H4  SHORT INJ        SHORT_RESISTANCE_PUL   L   $   2.9430 $   3.1169 $   2.5951    -$0.154
+     18 03-03    H4  LONG  PENDLE     DEMAND_3X_RETEST       L   $   1.2770 $   1.1809 $   1.4691    -$0.191
+     19 03-06    H4  LONG  RENDER     DEMAND_3X_RETEST       W   $   1.4192 $   1.3137 $   1.6302    +$0.358
+     20 03-05    H4  LONG  BLUR       HL_TRENDLINE_TOUCH     L   $   0.0197 $   0.0186 $   0.0218    -$0.144
+     21 02-12    H4  SHORT ICP        SHORT_RESISTANCE_PUL   L   $   2.3570 $   2.5309 $   2.0091    -$0.188
+     22 03-06    H4  LONG  ETC        HL_TRENDLINE_TOUCH     L   $   8.5130 $   7.9953 $   9.5484    -$0.152
+     23 03-06    H4  LONG  ARKM       HL_TRENDLINE_TOUCH     L   $   0.1061 $   0.0986 $   0.1211    -$0.172
+     24 02-13    H4  LONG  SUPER      DEMAND_3X_RETEST       W   $   0.1225 $   0.1135 $   0.1405    +$0.340
+     25 02-16    H4  LONG  KAS        HL_TRENDLINE_TOUCH     L   $   0.0318 $   0.0300 $   0.0354    -$0.143
+     26 02-15    H4  SHORT IP         SHORT_RESISTANCE_PUL   L   $   1.1770 $   1.2929 $   0.9452    -$0.240
+
+──────────────────────────────────────────────────────────────────────
+  ▶ Scenario: Feb 2026 → Hari Ini | Modal $20
+    Start: 2026-02-01 | Modal: $20.00
+──────────────────────────────────────────────────────────────────────
+    Modal Awal  : $20.00
+    Modal Akhir : $15.5204
+    Net Profit  : $-4.4796 (-22.4%)
+    Max Drawdown: 24.8%
+    Total Trades: 26 (5W / 21L)
+    LONG Trades : 17 | SHORT Trades: 9
+    Win Rate    : 19.2%
+    Profit Fctr : 0.38
+    Total Fees  : $0.2117
+    Avg WIN     : +$0.5411
+    Avg LOSS    : -$0.3421
+    Exp Value   : $-0.1723/trade
+
+    Trade Log:
+      # Date     TF  Dir   Coin       Signal                 W/L      Entry         SL         TP        PnL
+      1 02-21    H4  SHORT ETH        SHORT_RESISTANCE_PUL   W   $1962.8100 $2036.0725 $1816.2850    +$0.439
+      2 03-09    H4  SHORT DOGE       SHORT_RESISTANCE_PUL   L   $   0.0913 $   0.0959 $   0.0821    -$0.317
+      3 03-15    H4  LONG  ADA        HL_TRENDLINE_TOUCH     W   $   0.2637 $   0.2524 $   0.2863    +$0.509
+      4 03-13    H4  LONG  DOT        HL_TRENDLINE_TOUCH     L   $   1.5080 $   1.4401 $   1.6437    -$0.288
+      5 02-21    H4  LONG  LINK       HL_TRENDLINE_TOUCH     L   $   8.9340 $   8.5299 $   9.7422    -$0.285
+      6 03-03    H4  LONG  FIL        HL_TRENDLINE_TOUCH     L   $   0.9998 $   0.9314 $   1.1366    -$0.421
+      7 03-09    H4  SHORT BCH        SHORT_RESISTANCE_PUL   L   $ 449.5500 $ 465.9750 $ 416.7000    -$0.224
+      8 03-06    H4  LONG  UNI        DEMAND_3X_RETEST       L   $   3.9320 $   3.6900 $   4.4159    -$0.367
+      9 02-09    H1  LONG  ALGO       HL_TRENDLINE_TOUCH     L   $   0.0958 $   0.0936 $   0.1003    -$0.143
+     10 03-06    H4  LONG  SAND       HL_TRENDLINE_TOUCH     L   $   0.0829 $   0.0775 $   0.0936    -$0.375
+     11 03-06    H4  LONG  MANA       HL_TRENDLINE_TOUCH     L   $   0.0959 $   0.0902 $   0.1074    -$0.341
+     12 02-07    H1  SHORT GALA       SHORT_RESISTANCE_PUL   W   $   0.0043 $   0.0044 $   0.0040    +$0.361
+     13 03-06    H4  LONG  LDO        HL_TRENDLINE_TOUCH     L   $   0.3090 $   0.2886 $   0.3499    -$0.376
+     14 03-10    H4  SHORT PEPE       SHORT_RESISTANCE_PUL   L   $   0.0000 $   0.0000 $   0.0000    -$0.434
+     15 03-05    H4  LONG  BONK       HL_TRENDLINE_TOUCH     L   $   0.0000 $   0.0000 $   0.0000    -$0.427
+     16 03-04    H4  SHORT FLOKI      SHORT_RESISTANCE_PUL   L   $   0.0000 $   0.0000 $   0.0000    -$0.421
+     17 03-10    H4  SHORT INJ        SHORT_RESISTANCE_PUL   L   $   2.9430 $   3.1169 $   2.5951    -$0.307
+     18 03-03    H4  LONG  PENDLE     DEMAND_3X_RETEST       L   $   1.2770 $   1.1809 $   1.4691    -$0.382
+     19 03-06    H4  LONG  RENDER     DEMAND_3X_RETEST       W   $   1.4192 $   1.3137 $   1.6302    +$0.715
+     20 03-05    H4  LONG  BLUR       HL_TRENDLINE_TOUCH     L   $   0.0197 $   0.0186 $   0.0218    -$0.287
+     21 02-12    H4  SHORT ICP        SHORT_RESISTANCE_PUL   L   $   2.3570 $   2.5309 $   2.0091    -$0.376
+     22 03-06    H4  LONG  ETC        HL_TRENDLINE_TOUCH     L   $   8.5130 $   7.9953 $   9.5484    -$0.304
+     23 03-06    H4  LONG  ARKM       HL_TRENDLINE_TOUCH     L   $   0.1061 $   0.0986 $   0.1211    -$0.345
+     24 02-13    H4  LONG  SUPER      DEMAND_3X_RETEST       W   $   0.1225 $   0.1135 $   0.1405    +$0.681
+     25 02-16    H4  LONG  KAS        HL_TRENDLINE_TOUCH     L   $   0.0318 $   0.0300 $   0.0354    -$0.286
+     26 02-15    H4  SHORT IP         SHORT_RESISTANCE_PUL   L   $   1.1770 $   1.2929 $   0.9452    -$0.480
+
+──────────────────────────────────────────────────────────────────────
+  ▶ Scenario: 1 Bulan Terakhir   | Modal $3.50
+    Start: 2026-03-25 | Modal: $3.50
+──────────────────────────────────────────────────────────────────────
+    Modal Awal  : $3.50
+    Modal Akhir : $3.5000
+    Net Profit  : $0.0000 (+0.0%)
+    Max Drawdown: 0.0%
+    Total Trades: 0 (0W / 0L)
+    LONG Trades : 0 | SHORT Trades: 0
+    Win Rate    : 0.0%
+    Profit Fctr : 0.00
+    Total Fees  : $0.0000
+
+──────────────────────────────────────────────────────────────────────
+  ▶ Scenario: 1 Bulan Terakhir   | Modal $10
+    Start: 2026-03-25 | Modal: $10.00
+──────────────────────────────────────────────────────────────────────
+    Modal Awal  : $10.00
+    Modal Akhir : $10.0000
+    Net Profit  : $0.0000 (+0.0%)
+    Max Drawdown: 0.0%
+    Total Trades: 0 (0W / 0L)
+    LONG Trades : 0 | SHORT Trades: 0
+    Win Rate    : 0.0%
+    Profit Fctr : 0.00
+    Total Fees  : $0.0000
+
+──────────────────────────────────────────────────────────────────────
+  ▶ Scenario: 1 Bulan Terakhir   | Modal $20
+    Start: 2026-03-25 | Modal: $20.00
+──────────────────────────────────────────────────────────────────────
+    Modal Awal  : $20.00
+    Modal Akhir : $20.0000
+    Net Profit  : $0.0000 (+0.0%)
+    Max Drawdown: 0.0%
+    Total Trades: 0 (0W / 0L)
+    LONG Trades : 0 | SHORT Trades: 0
+    Win Rate    : 0.0%
+    Profit Fctr : 0.00
+    Total Fees  : $0.0000
+
+
+==========================================================================================
+  RINGKASAN SEMUA SKENARIO
+==========================================================================================
+  Skenario                                   Modal      Akhir     Net%     WR   MaxDD  Trades     L/S     PF
+  ──────────────────────────────────────── ─────── ────────── ──────── ────── ─────── ─────── ─────── ──────
+  Feb 2026 → Hari Ini | Modal $3.50        $ 3.50 $  2.7161   -22.4%  19.2%  24.8%      26  17L/9S  0.38
+  Feb 2026 → Hari Ini | Modal $10          $10.00 $  7.7602   -22.4%  19.2%  24.8%      26  17L/9S  0.38
+  Feb 2026 → Hari Ini | Modal $20          $20.00 $ 15.5204   -22.4%  19.2%  24.8%      26  17L/9S  0.38
+  1 Bulan Terakhir   | Modal $3.50         $ 3.50 $  3.5000    +0.0%   0.0%   0.0%       0   0L/0S  0.00
+  1 Bulan Terakhir   | Modal $10           $10.00 $ 10.0000    +0.0%   0.0%   0.0%       0   0L/0S  0.00
+  1 Bulan Terakhir   | Modal $20           $20.00 $ 20.0000    +0.0%   0.0%   0.0%       0   0L/0S  0.00
+==========================================================================================
+
+  Catatan:
+  • Risk/Trade: 3.0% | Leverage: 10x | Fee: 0.075%
+  • 1 trade per koin (no duplicate entries)
+  • LONG : Ascending Triangle  (Higher Lows + Flat Resistance + Kompresi)
+  • SHORT: Descending Triangle (Lower Highs + Flat Support   + Kompresi)
+  • Timeframe: H1 + H4
+==========================================================================================

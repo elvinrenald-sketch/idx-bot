@@ -590,6 +590,14 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
 
         vol_sma = calc_volume_sma(df, 20)
 
+        # Confidence formula yang meaningful (bukan selalu 100)
+        # Range realistis: 20-95 (100 hanya setup sempurna)
+        _hl_bonus     = min(30, (len(hl_indices) - 3) * 10)  # 0 untuk min 3 touch
+        _retest_bonus = min(30, retest_events * 15)
+        _vol_bonus    = min(15, vol_at_support_score * 5)
+        _rise_bonus   = 10 if total_rise > 10 else (5 if total_rise > 5 else 0)
+        _confidence   = min(100, 20 + _hl_bonus + _retest_bonus + _vol_bonus + _rise_bonus)
+
         signal = {
             'symbol': symbol,
             'timeframe': timeframe,
@@ -615,7 +623,7 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             'compression_pct': round(compression_pct, 1),
             'atr': round(current_atr, 8),
             'atr_pct': round((current_atr / entry_price) * 100, 2),
-            'confidence': min(100, 40 + len(hl_indices) * 15 + min(retest_events * 10, 30) + vol_at_support_score * 5),
+            'confidence': _confidence,
         }
 
         log.info(f"🎯 [{entry_type}]: {symbol} {timeframe} | "
@@ -1455,6 +1463,22 @@ def is_alpha_worthy(signal: Dict, coin_df: pd.DataFrame, btc_df: pd.DataFrame,
         passed_layers += 1
     else:
         reasons.append(f'LOW_CONFIDENCE({confidence}<55)')
+
+    # ── Layer 6: BTC 4h Momentum Guard ──
+    # Jika BTC turun >-1.5% dalam 4 candle terakhir, BLOCK entry.
+    # Alasan: semua mid-small cap berkorelasi 1:1 dengan BTC jangka pendek.
+    # Ascending triangle bisa valid secara teknikal tapi tetap ditarik turun
+    # jika BTC sedang dalam downswing aktif.
+    if btc_df is not None and len(btc_df) >= 5:
+        btc_4h_start = float(btc_df['close'].iloc[-5])
+        btc_4h_now   = float(btc_df['close'].iloc[-1])
+        btc_4h_chg   = ((btc_4h_now - btc_4h_start) / btc_4h_start) * 100
+        if btc_4h_chg < -1.5:
+            reasons.append(f'BTC_4H_DUMP({btc_4h_chg:+.1f}%<-1.5%)')
+            # Downswing BTC aktif = BLOCK semua entry, apapun pattern-nya
+            return False, reasons
+    else:
+        btc_4h_chg = 0.0
 
     # KEPUTUSAN: Minimal 3 dari 5 layer harus pass
     # Saat DOWNTREND: minimal 4 dari 5 (lebih ketat)

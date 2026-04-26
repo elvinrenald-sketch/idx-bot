@@ -145,7 +145,7 @@ class MarketScanner:
                 last_price = float(ticker.get('last', 0) or 0)
                 pct_change_24h = float(ticker.get('percentage', 0) or 0)
 
-                # Broad Filter: Min volume, Max volume (mid/small cap focus), and Price
+                # Broad Filter: Min/Max volume and Price (mid-small cap focus)
                 if vol_24h < MIN_VOLUME_24H or vol_24h > MAX_VOLUME_24H or last_price < MIN_PRICE:
                     continue
                 
@@ -279,7 +279,7 @@ class MarketScanner:
                 last_price = float(ticker.get('last', 0) or 0)
                 base = self.markets_info[symbol].get('base', symbol.split('/')[0])
 
-                if vol_24h < MIN_VOLUME_24H or last_price < MIN_PRICE:
+                if vol_24h < MIN_VOLUME_24H or vol_24h > MAX_VOLUME_24H or last_price < MIN_PRICE:
                     continue
                 if symbol in BLACKLIST_SYMBOLS:
                     continue
@@ -309,7 +309,7 @@ class MarketScanner:
             except (TypeError, ValueError):
                 continue
 
-        # Sort by volume descending — ambil top 60 (mirip v6 backtest 63 koin)
+        # Sort by volume descending — mid-small cap focus ($10M-$250M)
         candidates.sort(key=lambda x: x['volume_24h'], reverse=True)
         result = candidates[:60]
 

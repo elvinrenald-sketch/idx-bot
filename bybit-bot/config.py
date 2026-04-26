@@ -110,10 +110,10 @@ ATR_SL_MULT = {
 ATR_SL_MULT_DEFAULT = 1.5  # Fallback jika TF tidak dikenali
 
 # ══════════════════════════════════════════════════════════════
-# MARKET FILTERS (MID-SMALL CAP FOCUS)
+# MARKET FILTERS
 # ══════════════════════════════════════════════════════════════
-MIN_VOLUME_24H     = 10_000_000  # Minimal $10M (hindari micro cap yg gampang dimanipulasi)
-MAX_VOLUME_24H     = 250_000_000 # Maksimal $250M (hindari mega/large cap seperti BTC/ETH/SOL)
+MIN_VOLUME_24H     = 10_000_000   # Volume 24h minimal $10M (likuid, bukan micro cap)
+MAX_VOLUME_24H     = 250_000_000  # Volume 24h max $250M (skip mega cap BTC/ETH/SOL)
 MAX_SPREAD_PCT     = 0.15      # Spread max 0.15%
 MIN_PRICE          = 0.0001    # Harga minimum (filter dust coins)
 MIN_NOTIONAL_USDT  = 5.5       # Bybit minimum order $5 USDT (tambah buffer 10%)

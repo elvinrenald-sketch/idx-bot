@@ -327,12 +327,13 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                                     tp_price=signal['tp_price'],
                                     margin_used=sizing['margin_required'],
                                     timeframe=signal['timeframe'],
-                                    alpha_pct=signal.get('alpha', 0),
-                                    volume_ratio=signal['volume_ratio'],
+                                    alpha_pct=0,
+                                    volume_ratio=signal.get('volume_ratio', 1.0),
                                     signal_data=json.dumps({
-                                        'confidence': signal['confidence'],
-                                        'stoch': signal['stoch_signal'],
-                                        'hl_touches': signal['hl_touches'],
+                                        'confidence': signal.get('confidence', 0),
+                                        'signal_type': signal.get('signal_type', ''),
+                                        'hl_touches': signal.get('hl_touches', 0),
+                                        'resistance_retests': signal.get('resistance_retest_count', 0),
                                     }),
                                 )
 
@@ -345,7 +346,15 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                                 log.info(f"✅ TRADE EXECUTED: #{pos_id} {signal['bybit_symbol']} "
                                          f"@ {fill_price:.6f}")
                             else:
-                                log.warning(f"Order failed for {signal['symbol']}")
+                                # Order gagal — kirim notif ke Telegram juga
+                                err_msg = result.get('error', 'Unknown') if result else 'No result'
+                                log.warning(f"Order failed for {signal['symbol']}: {err_msg}")
+                                await tg_send(session,
+                                    f"⚠️ <b>ORDER FAILED</b>\n"
+                                    f"📊 {signal['symbol']} ({signal['timeframe']})\n"
+                                    f"❌ {err_msg}\n"
+                                    f"💰 Equity: ${WEB.equity:.2f}"
+                                )
 
                         except Exception as trade_err:
                             log.error(f"Trade execution error: {trade_err}")

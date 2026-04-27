@@ -384,7 +384,7 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             relevant_highs = [i for i in p_highs if i >= first_hl_idx]
             if len(relevant_highs) >= 2:
                 # Ambil harga-harga pivot high terbaru
-                ph_prices = [df['high'].iloc[i] for i in relevant_highs[-5:]]
+                ph_prices = [max(df['open'].iloc[i], df['close'].iloc[i]) for i in relevant_highs[-5:]]
                 ph_max = max(ph_prices)
                 ph_min = min(ph_prices)
                 last_ph = ph_prices[-1]
@@ -474,7 +474,7 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         near_trendline = False
         if trendline_price and trendline_price > 0 and MIN_HL_TOUCHES <= len(hl_indices) <= MAX_HL_TOUCHES:
             distance_pct = ((current_price - trendline_price) / trendline_price) * 100
-            near_trendline = (-1.5 <= distance_pct <= 2.5)
+            near_trendline = (-1.5 <= distance_pct <= 1.5)
 
         # Entry B: Flat resistance (demand zone) retest ke-2+
         # Seperti chart DASH: harga naik ke $36 untuk ke-3 kalinya = ENTRY
@@ -488,14 +488,16 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             return None
             
         # -- Step 6.5: VOLUME CONFIRMATION --
-        # Replace stochastic with a strict 1.5x - 2.0x volume multiplier of SMA 20
+        # Pullback entry = volume should NOT be dead, but doesn't need to spike
+        # Accept if volume >= 0.7x avg (not dead) OR volume is rising (bounce starting)
         vol_sma = calc_volume_sma(df, 20)
         vol_ratio_1 = df['volume'].iloc[-1] / vol_sma.iloc[-1] if vol_sma.iloc[-1] > 0 else 1.0
         vol_ratio_2 = df['volume'].iloc[-2] / vol_sma.iloc[-2] if vol_sma.iloc[-2] > 0 else 1.0
         max_vol_ratio = max(vol_ratio_1, vol_ratio_2)
+        vol_rising = vol_ratio_1 > vol_ratio_2  # Volume increasing = bounce confirmation
         
-        if max_vol_ratio < VOLUME_BREAKOUT_MULT:
-            return None  # Volume not confirming the bounce/entry
+        if max_vol_ratio < 0.7 and not vol_rising:
+            return None  # Volume completely dead — no interest at this level
 
         # -- Step 7: MAX RISE FILTER --
         recent_high = df['high'].iloc[-30:].max()
@@ -558,12 +560,14 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         vol_sma = calc_volume_sma(df, 20)
 
         # Confidence formula yang meaningful (bukan selalu 100)
-        # Range realistis: 20-95 (100 hanya setup sempurna)
-        _hl_bonus     = min(30, (len(hl_indices) - 3) * 10)  # 0 untuk min 3 touch
-        _retest_bonus = min(30, retest_events * 15)
+        # Range realistis: 35-100
+        # Min valid setup (2 HL + 2 retest) = 35 + 0 + 20 + 0 + 0 = 55
+        _hl_bonus     = min(25, max(0, (len(hl_indices) - 2) * 12))  # 0/12/25 for 2/3/4 HL
+        _retest_bonus = min(25, (retest_events - 1) * 12)  # 0/12/25 for 1/2/3 retest (min 2 = 12)
         _vol_bonus    = min(15, vol_at_support_score * 5)
-        _rise_bonus   = 10 if total_rise > 10 else (5 if total_rise > 5 else 0)
-        _confidence   = min(100, 20 + _hl_bonus + _retest_bonus + _vol_bonus + _rise_bonus)
+        _compress_bonus = min(10, int(compression_pct / 10)) if compression_pct > 0 else 0
+        _rise_bonus   = 5 if total_rise > 5 else 0
+        _confidence   = min(100, 35 + _hl_bonus + _retest_bonus + _vol_bonus + _compress_bonus + _rise_bonus)
 
         signal = {
             'symbol': symbol,

@@ -266,6 +266,7 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
     """Main scanning loop — runs every SCAN_INTERVAL_SEC."""
     log.info("🚀 Scan loop started")
     already_traded = set()  # Symbols traded this session
+    already_traded_reset_scan = 0  # Reset counter
 
     async with aiohttp.ClientSession() as session:
         # Startup notification
@@ -293,6 +294,16 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
 
                 # ── Poll Telegram chat ID (until found) ────────
                 await tg_poll_chat_id(session)
+
+                # ── Reset already_traded every ~4 hours (240 scans at 60s) ──
+                already_traded_reset_scan += 1
+                if already_traded_reset_scan >= 240:
+                    # Keep only currently open positions in the set
+                    open_syms = set(db.get_open_symbols())
+                    cleared = len(already_traded) - len(already_traded & open_syms)
+                    already_traded = already_traded & open_syms
+                    already_traded_reset_scan = 0
+                    log.info(f"🔄 Cleared {cleared} stale symbols from already_traded (4h reset)")
 
                 # ── Step 1: Get current equity ──────────────────
                 equity = await asyncio.to_thread(executor.get_equity)
@@ -345,9 +356,9 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
 
                             signal = analyze(df, coin['symbol'], tf)
                             if signal:
-                                # Filter Minimal Confidence 60/100
-                                if signal.get('confidence', 0) < 60:
-                                    log.info(f"⚠️ CONFIDENCE_REJECT {tf}: {coin['base']} score={signal['confidence']} < 60")
+                                # Filter Minimal Confidence 45/100
+                                if signal.get('confidence', 0) < 45:
+                                    log.info(f"⚠️ CONFIDENCE_REJECT {tf}: {coin['base']} score={signal['confidence']} < 45")
                                     continue
                                 signal['bybit_symbol'] = coin['bybit_symbol']
                                 signal['volume_24h'] = coin['volume_24h']

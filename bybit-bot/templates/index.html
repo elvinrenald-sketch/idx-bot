@@ -1,41 +1,89 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bybit Terminal | Bounce Strategy</title>
+    <title>Bybit Alpha Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
             theme: {
                 extend: {
                     fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                        mono: ['JetBrains Mono', 'monospace'],
+                        sans: ['Exo 2', 'sans-serif'],
+                        mono: ['Orbitron', 'monospace'],
                     },
                     colors: {
                         brand: {
-                            50: '#eff6ff',
-                            100: '#dbeafe',
-                            400: '#60a5fa',
-                            500: '#3b82f6',
-                            600: '#2563eb',
-                            900: '#1e3a8a',
+                            50: '#fffbeb',
+                            100: '#fef3c7',
+                            200: '#fde68a',
+                            300: '#fcd34d',
+                            400: '#fbbf24',
+                            500: '#f59e0b',
+                            600: '#d97706',
+                            900: '#78350f',
+                            glow: 'rgba(245, 158, 11, 0.4)'
                         },
-                        dark: {
-                            bg: '#0B0F19',
-                            card: '#131A2A',
-                            border: '#1E293B',
-                            text: '#94A3B8',
-                            heading: '#F8FAFC'
+                        cyber: {
+                            bg: '#050B14',
+                            surface: 'rgba(15, 23, 42, 0.65)',
+                            surfaceLight: 'rgba(30, 41, 59, 0.7)',
+                            border: 'rgba(51, 65, 85, 0.5)',
+                            borderBright: 'rgba(148, 163, 184, 0.3)'
                         },
                         accent: {
-                            green: '#10B981',
-                            green_glow: 'rgba(16, 185, 129, 0.2)',
-                            red: '#F43F5E',
-                            red_glow: 'rgba(244, 63, 94, 0.2)'
+                            cyan: '#06b6d4',
+                            purple: '#8b5cf6',
+                            green: '#10b981',
+                            red: '#ef4444'
+                        }
+                    },
+                    backgroundImage: {
+                        'grid-pattern': `linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px),
+                                         linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px)`,
+                        'scanline': 'linear-gradient(to bottom, transparent 50%, rgba(0, 0, 0, 0.25) 51%)'
+                    },
+                    animation: {
+                        'radar': 'radar-spin 4s linear infinite',
+                        'flash': 'data-flash 0.5s ease-out',
+                        'float': 'float 6s ease-in-out infinite',
+                        'pulse-glow': 'pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'grid-move': 'grid-move 20s linear infinite',
+                        'slide-up': 'slide-up 0.5s ease-out forwards',
+                        'fade-in': 'fade-in 0.8s ease-out forwards'
+                    },
+                    keyframes: {
+                        'radar-spin': {
+                            '0%': { transform: 'rotate(0deg)' },
+                            '100%': { transform: 'rotate(360deg)' }
+                        },
+                        'data-flash': {
+                            '0%': { backgroundColor: 'rgba(16, 185, 129, 0.3)' },
+                            '100%': { backgroundColor: 'transparent' }
+                        },
+                        'float': {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-5px)' }
+                        },
+                        'pulse-glow': {
+                            '0%, 100%': { opacity: 1, filter: 'drop-shadow(0 0 8px rgba(245, 158, 11, 0.8))' },
+                            '50%': { opacity: 0.5, filter: 'drop-shadow(0 0 2px rgba(245, 158, 11, 0.2))' }
+                        },
+                        'grid-move': {
+                            '0%': { transform: 'translateY(0)' },
+                            '100%': { transform: 'translateY(40px)' }
+                        },
+                        'slide-up': {
+                            '0%': { opacity: 0, transform: 'translateY(20px)' },
+                            '100%': { opacity: 1, transform: 'translateY(0)' }
+                        },
+                        'fade-in': {
+                            '0%': { opacity: 0 },
+                            '100%': { opacity: 1 }
                         }
                     }
                 }
@@ -44,211 +92,371 @@
     </script>
     <style>
         body {
-            background-color: #0B0F19;
+            background-color: #050B14;
             color: #F8FAFC;
             -webkit-font-smoothing: antialiased;
+            overflow-x: hidden;
+            position: relative;
         }
-        .glass-card {
-            background: #131A2A;
-            border: 1px solid #1E293B;
-            border-radius: 16px;
-            box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        
+        /* Grid Background */
+        .bg-grid {
+            position: fixed;
+            top: -50%; left: -50%; right: -50%; bottom: -50%;
+            width: 200%; height: 200%;
+            background-image: linear-gradient(to right, rgba(245, 158, 11, 0.03) 1px, transparent 1px),
+                              linear-gradient(to bottom, rgba(245, 158, 11, 0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            z-index: -2;
+            transform: perspective(500px) rotateX(60deg) translateY(-100px) translateZ(-200px);
+            animation: grid-move 20s linear infinite;
         }
-        .glass-card:hover {
-            border-color: #334155;
-            box-shadow: 0 8px 30px -4px rgba(0, 0, 0, 0.6);
+
+        .bg-vignette {
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(circle at center, transparent 30%, #050B14 90%);
+            z-index: -1;
+            pointer-events: none;
         }
-        .text-glow-green {
-            text-shadow: 0 0 16px rgba(16, 185, 129, 0.4);
-            color: #10B981;
+
+        /* Glassmorphism Classes */
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.5);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(245, 158, 11, 0.15);
+            border-top: 1px solid rgba(245, 158, 11, 0.3);
+            border-left: 1px solid rgba(245, 158, 11, 0.2);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.6), inset 0 0 20px rgba(245, 158, 11, 0.02);
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            position: relative;
+            overflow: hidden;
         }
-        .text-glow-red {
-            text-shadow: 0 0 16px rgba(244, 63, 94, 0.4);
-            color: #F43F5E;
+
+        .glass-panel::before {
+            content: '';
+            position: absolute;
+            top: 0; left: -100%; width: 50%; height: 100%;
+            background: linear-gradient(to right, transparent, rgba(255,255,255,0.03), transparent);
+            transform: skewX(-25deg);
+            transition: 0.5s;
+            pointer-events: none;
         }
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
+
+        .glass-panel:hover::before {
+            left: 200%;
+            transition: 0.7s;
         }
-        ::-webkit-scrollbar-track {
-            background: transparent;
+
+        .glass-panel:hover {
+            border-color: rgba(245, 158, 11, 0.5);
+            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.8), 0 0 15px rgba(245, 158, 11, 0.2);
+            transform: translateY(-2px);
         }
-        ::-webkit-scrollbar-thumb {
-            background: #334155;
-            border-radius: 4px;
+
+        /* Value Flash Animation (Triggered via JS) */
+        .flash-update {
+            animation: value-flash 0.8s ease-out;
         }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #475569;
+
+        @keyframes value-flash {
+            0% { color: #fcd34d; text-shadow: 0 0 15px #f59e0b; transform: scale(1.05); }
+            100% { color: inherit; text-shadow: none; transform: scale(1); }
         }
-        .table-row {
-            transition: background-color 0.15s ease;
+
+        /* Typography Enhancements */
+        .text-glow { text-shadow: 0 0 10px rgba(255, 255, 255, 0.3); }
+        .text-glow-brand { text-shadow: 0 0 12px rgba(245, 158, 11, 0.6); color: #fbbf24; }
+        .text-glow-green { text-shadow: 0 0 12px rgba(16, 185, 129, 0.6); color: #34d399; }
+        .text-glow-red { text-shadow: 0 0 12px rgba(239, 68, 68, 0.6); color: #f87171; }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+        ::-webkit-scrollbar-thumb { background: rgba(245, 158, 11, 0.3); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(245, 158, 11, 0.6); }
+
+        /* Scanner Radar Effect */
+        .radar-box { position: relative; overflow: hidden; border-radius: 50%; width: 24px; height: 24px; border: 1px solid rgba(245,158,11,0.3); background: rgba(245,158,11,0.05); }
+        .radar-sweep { position: absolute; top: 0; left: 50%; width: 50%; height: 50%; background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.8)); transform-origin: 0% 100%; animation: radar-spin 2s linear infinite; }
+        .radar-box::after { content: ''; position: absolute; inset: 0; border-radius: 50%; box-shadow: inset 0 0 10px rgba(245,158,11,0.5); }
+
+        /* Delay utilities for entry animations */
+        .delay-100 { animation-delay: 100ms; }
+        .delay-200 { animation-delay: 200ms; }
+        .delay-300 { animation-delay: 300ms; }
+        .delay-400 { animation-delay: 400ms; }
+        
+        .hex-bg {
+            background-image: url("data:image/svg+xml,%3Csvg width='40' height='69' viewBox='0 0 40 69' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M20 0l20 11.5v23L20 46 0 34.5v-23L20 0zm0 13.8L4.6 22.7v17.6L20 49.2l15.4-8.9V22.7L20 13.8z' fill='rgba(245,158,11,0.02)' fill-rule='evenodd'/%3E%3C/svg%3E");
         }
-        .table-row:hover {
-            background-color: rgba(30, 41, 59, 0.5);
-        }
-        .pulse-dot {
-            animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        @keyframes pulse-ring {
-            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5); }
-            70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
-        }
+
+        /* Cyber corner accents */
+        .cyber-corner { position: absolute; width: 10px; height: 10px; border: 2px solid #f59e0b; z-index: 10; pointer-events: none; }
+        .tl { top: 0; left: 0; border-right: none; border-bottom: none; }
+        .tr { top: 0; right: 0; border-left: none; border-bottom: none; }
+        .bl { bottom: 0; left: 0; border-right: none; border-top: none; }
+        .br { bottom: 0; right: 0; border-left: none; border-top: none; }
     </style>
 </head>
-<body class="min-h-screen p-4 md:p-8 font-sans">
+<body class="min-h-screen text-slate-200 font-sans hex-bg selection:bg-brand-500 selection:text-black">
     
-    <div class="max-w-7xl mx-auto space-y-6">
+    <!-- 3D Environment Background -->
+    <div class="bg-grid"></div>
+    <div class="bg-vignette"></div>
+
+    <div class="max-w-[1600px] mx-auto p-4 md:p-6 space-y-6 relative z-10">
         
-        <!-- Header -->
-        <header class="flex flex-col md:flex-row justify-between items-start md:items-center pb-6 border-b border-dark-border gap-4">
+        <!-- ========================================== -->
+        <!-- HEADER: SYS-COM -->
+        <!-- ========================================== -->
+        <header class="glass-panel rounded-2xl p-4 flex flex-col md:flex-row justify-between items-center gap-4 animate-slide-up">
+            <!-- Cyber Corners -->
+            <div class="cyber-corner tl"></div><div class="cyber-corner tr"></div>
+            <div class="cyber-corner bl"></div><div class="cyber-corner br"></div>
+
+            <!-- Logo & Title -->
             <div class="flex items-center gap-4">
-                <div class="w-10 h-10 rounded-xl bg-brand-500/20 border border-brand-500/30 flex items-center justify-center">
-                    <svg class="w-5 h-5 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                <div class="relative w-12 h-12 rounded-lg bg-black border border-brand-500/50 flex items-center justify-center overflow-hidden group shadow-[0_0_15px_rgba(245,158,11,0.3)]">
+                    <div class="absolute inset-0 bg-brand-500/10 group-hover:bg-brand-500/30 transition-colors"></div>
+                    <i data-lucide="cpu" class="w-6 h-6 text-brand-400 animate-pulse-glow"></i>
                 </div>
                 <div>
-                    <h1 class="text-xl font-bold tracking-tight text-white">Bybit Terminal</h1>
-                    <p class="text-sm text-dark-text mt-0.5 font-medium flex items-center gap-2">
-                        <span class="inline-block w-2 h-2 rounded-full bg-brand-400"></span>
-                        PA & Volume Bounce Strategy
+                    <h1 class="text-2xl font-mono font-bold tracking-widest text-white uppercase flex items-center gap-2">
+                        ALPHA<span class="text-brand-500 font-light">TERMINAL</span>
+                        <span class="text-[10px] px-1.5 py-0.5 bg-brand-500/20 text-brand-400 border border-brand-500/30 rounded font-sans ml-2 animate-pulse">v3.0</span>
+                    </h1>
+                    <p class="text-xs text-slate-400 font-mono mt-1 flex items-center gap-2">
+                        <i data-lucide="activity" class="w-3 h-3 text-brand-500"></i>
+                        AUTONOMOUS PRICE ACTION ENGINE
                     </p>
                 </div>
             </div>
-            <div class="flex items-center gap-4 bg-dark-card border border-dark-border py-2 px-4 rounded-full">
-                <div class="flex items-center gap-2">
-                    <div id="status-dot" class="w-2.5 h-2.5 rounded-full bg-brand-500 pulse-dot"></div>
-                    <span id="status" class="text-xs font-bold uppercase tracking-wider text-brand-400">SCANNING</span>
+
+            <!-- System Status -->
+            <div class="flex items-center gap-4 bg-black/40 border border-brand-500/20 py-2.5 px-5 rounded-xl shadow-inner">
+                <div class="flex items-center gap-3">
+                    <div class="radar-box"><div class="radar-sweep"></div></div>
+                    <div class="flex flex-col">
+                        <span id="status" class="text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-brand-400">SYS_SCANNING</span>
+                        <span id="scan-count" class="text-[10px] text-slate-500 font-mono tracking-wider">CYCLE 0000</span>
+                    </div>
                 </div>
-                <div class="w-px h-4 bg-dark-border"></div>
-                <span id="scan-count" class="text-xs font-mono text-dark-text">Scan #0</span>
+                <div class="w-px h-8 bg-brand-500/20 mx-2"></div>
+                <div class="flex gap-3">
+                    <div class="text-center">
+                        <p class="text-[9px] text-slate-500 font-mono uppercase">Network</p>
+                        <p class="text-xs text-emerald-400 font-mono flex items-center gap-1 justify-center"><i data-lucide="wifi" class="w-3 h-3"></i> 14ms</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-[9px] text-slate-500 font-mono uppercase">Node</p>
+                        <p class="text-xs text-cyan-400 font-mono">OK</p>
+                    </div>
+                </div>
             </div>
         </header>
 
-        <!-- KPI Metrics Grid -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <!-- Equity -->
-            <div class="glass-card p-6">
-                <h3 class="text-xs font-semibold text-dark-text uppercase tracking-wider mb-2">Total Equity</h3>
-                <div class="flex items-baseline gap-1">
-                    <span class="text-3xl font-mono font-bold text-white" id="equity">$0.00</span>
+        <!-- ========================================== -->
+        <!-- HUD: KPI METRICS -->
+        <!-- ========================================== -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+            
+            <!-- 1. Equity -->
+            <div class="glass-panel rounded-2xl p-5 animate-slide-up delay-100 flex flex-col justify-between">
+                <div class="flex justify-between items-start mb-2">
+                    <h3 class="text-xs font-mono text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <i data-lucide="wallet" class="w-3.5 h-3.5 text-brand-500"></i> NAV / Equity
+                    </h3>
+                    <div class="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse"></div>
                 </div>
-                <div class="mt-4 flex items-center justify-between text-xs font-mono">
-                    <span class="text-dark-text">UTA: <span id="uta-avail" class="text-white">$0.00</span></span>
-                    <span class="text-dark-text">Fund: <span id="fund-avail" class="text-white">$0.00</span></span>
+                <div class="my-3">
+                    <span class="text-4xl font-mono font-bold text-white text-glow tracking-tight data-val" id="equity">$0.00</span>
                 </div>
-            </div>
-
-            <!-- Total PnL -->
-            <div class="glass-card p-6">
-                <h3 class="text-xs font-semibold text-dark-text uppercase tracking-wider mb-2">Total PnL</h3>
-                <div class="flex items-baseline gap-1">
-                    <span class="text-3xl font-mono font-bold" id="total-pnl">$0.00</span>
-                </div>
-                <div class="mt-4 text-xs font-mono text-dark-text">
-                    <span id="total-trades" class="font-medium text-white">0</span> total trades executed
-                </div>
-            </div>
-
-            <!-- Win Rate -->
-            <div class="glass-card p-6">
-                <h3 class="text-xs font-semibold text-dark-text uppercase tracking-wider mb-2">Win Rate</h3>
-                <div class="flex items-baseline gap-1">
-                    <span class="text-3xl font-mono font-bold text-white" id="winrate">0.0%</span>
-                </div>
-                <div class="mt-4 flex items-center gap-4 text-xs font-mono">
-                    <span class="text-accent-green bg-accent-green/10 px-2 py-0.5 rounded">W: <span id="wins">0</span></span>
-                    <span class="text-accent-red bg-accent-red/10 px-2 py-0.5 rounded">L: <span id="losses">0</span></span>
+                <div class="grid grid-cols-2 gap-2 mt-2 pt-3 border-t border-brand-500/10">
+                    <div>
+                        <p class="text-[9px] font-mono text-slate-500 uppercase">UTA Margin</p>
+                        <p class="text-xs font-mono text-brand-300 data-val" id="uta-avail">$0.00</p>
+                    </div>
+                    <div>
+                        <p class="text-[9px] font-mono text-slate-500 uppercase">Fund Vault</p>
+                        <p class="text-xs font-mono text-slate-300 data-val" id="fund-avail">$0.00</p>
+                    </div>
                 </div>
             </div>
 
-            <!-- Scanner Status -->
-            <div class="glass-card p-6">
-                <h3 class="text-xs font-semibold text-dark-text uppercase tracking-wider mb-2">Active Signals</h3>
-                <div class="flex items-baseline gap-1">
-                    <span class="text-3xl font-mono font-bold text-brand-400" id="signals">0</span>
+            <!-- 2. PnL -->
+            <div class="glass-panel rounded-2xl p-5 animate-slide-up delay-200 flex flex-col justify-between">
+                <div class="flex justify-between items-start mb-2">
+                    <h3 class="text-xs font-mono text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <i data-lucide="trending-up" class="w-3.5 h-3.5 text-brand-500"></i> NET YIELD
+                    </h3>
+                    <i data-lucide="bar-chart-2" class="w-4 h-4 text-slate-600"></i>
                 </div>
-                <div class="mt-4 text-xs font-mono text-dark-text">
-                    Scanning <span id="scan-info" class="text-white font-medium">0</span> pairs
+                <div class="my-3">
+                    <span class="text-4xl font-mono font-bold data-val" id="total-pnl">$0.00</span>
+                </div>
+                <div class="mt-2 pt-3 border-t border-brand-500/10 flex justify-between items-center">
+                    <p class="text-[9px] font-mono text-slate-500 uppercase">Execution Volume</p>
+                    <p class="text-xs font-mono text-white bg-white/5 px-2 py-0.5 rounded border border-white/10"><span id="total-trades" class="text-brand-400 data-val">0</span> TXS</p>
+                </div>
+            </div>
+
+            <!-- 3. Win Rate -->
+            <div class="glass-panel rounded-2xl p-5 animate-slide-up delay-300 flex flex-col justify-between">
+                <div class="flex justify-between items-start mb-2">
+                    <h3 class="text-xs font-mono text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <i data-lucide="target" class="w-3.5 h-3.5 text-brand-500"></i> PRECISION
+                    </h3>
+                </div>
+                <div class="my-3 flex items-end gap-3">
+                    <span class="text-4xl font-mono font-bold text-white text-glow data-val" id="winrate">0.0%</span>
+                    <span class="text-xs font-mono text-slate-400 mb-1">ACCURACY</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2 mt-2 pt-3 border-t border-brand-500/10">
+                    <div class="flex items-center gap-2">
+                        <div class="w-1.5 h-4 bg-emerald-500 rounded-sm"></div>
+                        <div>
+                            <p class="text-[9px] font-mono text-slate-500 uppercase">Wins</p>
+                            <p class="text-xs font-mono text-emerald-400 data-val" id="wins">0</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="w-1.5 h-4 bg-rose-500 rounded-sm"></div>
+                        <div>
+                            <p class="text-[9px] font-mono text-slate-500 uppercase">Losses</p>
+                            <p class="text-xs font-mono text-rose-400 data-val" id="losses">0</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. Signals -->
+            <div class="glass-panel rounded-2xl p-5 animate-slide-up delay-400 flex flex-col justify-between relative overflow-hidden">
+                <!-- Decorative background for this card -->
+                <div class="absolute right-[-20px] bottom-[-20px] opacity-10">
+                    <i data-lucide="crosshair" class="w-32 h-32 text-brand-500"></i>
+                </div>
+                
+                <div class="flex justify-between items-start mb-2 relative z-10">
+                    <h3 class="text-xs font-mono text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <i data-lucide="radio" class="w-3.5 h-3.5 text-brand-500"></i> RADAR LOCKS
+                    </h3>
+                </div>
+                <div class="my-3 relative z-10">
+                    <span class="text-5xl font-mono font-black text-transparent bg-clip-text bg-gradient-to-br from-brand-300 to-brand-600 drop-shadow-[0_0_10px_rgba(245,158,11,0.5)] data-val" id="signals">0</span>
+                </div>
+                <div class="mt-2 pt-3 border-t border-brand-500/10 flex justify-between items-center relative z-10">
+                    <p class="text-[9px] font-mono text-slate-500 uppercase">Target Pool</p>
+                    <p class="text-xs font-mono text-white"><span id="scan-info" class="text-cyan-400 font-bold data-val">0</span> ASSETS</p>
                 </div>
             </div>
         </div>
 
-        <!-- Main Content Area -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- ========================================== -->
+        <!-- CORE GRIDS: POSITIONS & WATCHLIST -->
+        <!-- ========================================== -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             
-            <!-- Left Column: Positions & Trades -->
-            <div class="lg:col-span-2 space-y-6">
+            <!-- Left Column (Span 8): Tables -->
+            <div class="lg:col-span-8 flex flex-col gap-6">
                 
-                <!-- Open Positions -->
-                <div class="glass-card overflow-hidden flex flex-col h-[300px]">
-                    <div class="px-6 py-4 border-b border-dark-border bg-[#0E131F]">
-                        <h3 class="text-sm font-semibold text-white">Active Positions</h3>
+                <!-- ACTIVE DEPLOYMENTS -->
+                <div class="glass-panel rounded-2xl flex flex-col h-[320px] animate-slide-up delay-200">
+                    <!-- Table Header -->
+                    <div class="px-5 py-3 border-b border-brand-500/20 bg-black/40 flex justify-between items-center">
+                        <h3 class="text-xs font-mono font-bold text-white tracking-widest flex items-center gap-2">
+                            <i data-lucide="box" class="w-4 h-4 text-brand-500"></i> ACTIVE DEPLOYMENTS
+                        </h3>
+                        <div class="flex gap-1">
+                            <div class="w-2 h-2 rounded-full bg-brand-500/50"></div>
+                            <div class="w-2 h-2 rounded-full bg-brand-500/80"></div>
+                            <div class="w-2 h-2 rounded-full bg-brand-500 shadow-[0_0_5px_#f59e0b]"></div>
+                        </div>
                     </div>
-                    <div class="flex-1 overflow-auto">
+                    
+                    <div class="flex-1 overflow-auto custom-scrollbar relative">
                         <table class="w-full text-left text-sm whitespace-nowrap">
-                            <thead class="text-xs text-dark-text uppercase bg-[#0B0F19] sticky top-0 z-10">
+                            <thead class="text-[10px] text-brand-400/70 font-mono uppercase sticky top-0 bg-[#070b14]/95 backdrop-blur-md z-10 border-b border-brand-500/10 shadow-md">
                                 <tr>
-                                    <th class="px-6 py-3 font-semibold">Symbol</th>
-                                    <th class="px-6 py-3 font-semibold">Entry</th>
-                                    <th class="px-6 py-3 font-semibold">SL / TP</th>
-                                    <th class="px-6 py-3 font-semibold">Lev</th>
-                                    <th class="px-6 py-3 font-semibold text-right">Confidence</th>
+                                    <th class="px-5 py-3 font-medium">Asset</th>
+                                    <th class="px-5 py-3 font-medium">Entry Price</th>
+                                    <th class="px-5 py-3 font-medium">SL / TP Matrix</th>
+                                    <th class="px-5 py-3 font-medium">Leverage</th>
+                                    <th class="px-5 py-3 font-medium text-right">Confidence</th>
                                 </tr>
                             </thead>
-                            <tbody id="pos-list" class="divide-y divide-dark-border text-gray-300 font-mono text-xs">
-                                <tr><td colspan="5" class="px-6 py-8 text-center text-dark-text italic">No open positions</td></tr>
+                            <tbody id="pos-list" class="divide-y divide-brand-500/10 text-slate-300 font-mono text-xs">
+                                <tr><td colspan="5" class="px-6 py-12 text-center text-slate-500">
+                                    <div class="flex flex-col items-center justify-center gap-3">
+                                        <i data-lucide="hexagon" class="w-8 h-8 text-slate-700 animate-spin-slow"></i>
+                                        <p class="text-[10px] tracking-[0.2em] uppercase">Awaiting tactical entry...</p>
+                                    </div>
+                                </td></tr>
                             </tbody>
                         </table>
                     </div>
                 </div>
 
-                <!-- Recent Trades -->
-                <div class="glass-card overflow-hidden flex flex-col h-[400px]">
-                    <div class="px-6 py-4 border-b border-dark-border bg-[#0E131F]">
-                        <h3 class="text-sm font-semibold text-white">Trade History</h3>
+                <!-- TRADE ARCHIVE -->
+                <div class="glass-panel rounded-2xl flex flex-col h-[350px] animate-slide-up delay-300">
+                    <div class="px-5 py-3 border-b border-brand-500/20 bg-black/40 flex justify-between items-center">
+                        <h3 class="text-xs font-mono font-bold text-white tracking-widest flex items-center gap-2">
+                            <i data-lucide="database" class="w-4 h-4 text-brand-500"></i> EXECUTION ARCHIVE
+                        </h3>
                     </div>
-                    <div class="flex-1 overflow-auto">
+                    
+                    <div class="flex-1 overflow-auto custom-scrollbar">
                         <table class="w-full text-left text-sm whitespace-nowrap">
-                            <thead class="text-xs text-dark-text uppercase bg-[#0B0F19] sticky top-0 z-10">
+                            <thead class="text-[10px] text-brand-400/70 font-mono uppercase sticky top-0 bg-[#070b14]/95 backdrop-blur-md z-10 border-b border-brand-500/10">
                                 <tr>
-                                    <th class="px-6 py-3 font-semibold">#</th>
-                                    <th class="px-6 py-3 font-semibold">Symbol</th>
-                                    <th class="px-6 py-3 font-semibold">Entry → Exit</th>
-                                    <th class="px-6 py-3 font-semibold text-right">PnL</th>
-                                    <th class="px-6 py-3 font-semibold text-right">Reason</th>
+                                    <th class="px-5 py-3 font-medium w-12">ID</th>
+                                    <th class="px-5 py-3 font-medium">Asset</th>
+                                    <th class="px-5 py-3 font-medium">Delta (En → Ex)</th>
+                                    <th class="px-5 py-3 font-medium text-right">Yield (PnL)</th>
+                                    <th class="px-5 py-3 font-medium text-right">Trigger</th>
                                 </tr>
                             </thead>
-                            <tbody id="trades-list" class="divide-y divide-dark-border text-gray-300 font-mono text-xs">
-                                <tr><td colspan="5" class="px-6 py-8 text-center text-dark-text italic">No trades executed yet</td></tr>
+                            <tbody id="trades-list" class="divide-y divide-brand-500/10 text-slate-300 font-mono text-xs">
+                                <tr><td colspan="5" class="px-6 py-12 text-center text-slate-500">
+                                    <div class="flex flex-col items-center justify-center gap-3">
+                                        <i data-lucide="server-crash" class="w-8 h-8 text-slate-700"></i>
+                                        <p class="text-[10px] tracking-[0.2em] uppercase">Database empty</p>
+                                    </div>
+                                </td></tr>
                             </tbody>
                         </table>
                     </div>
                 </div>
-
             </div>
 
-            <!-- Right Column: Watchlist -->
-            <div class="space-y-6">
-                <div class="glass-card overflow-hidden flex flex-col h-[724px]">
-                    <div class="px-6 py-4 border-b border-dark-border bg-[#0E131F] flex justify-between items-center">
-                        <h3 class="text-sm font-semibold text-white">Live Scanner</h3>
-                        <span class="text-[10px] uppercase font-bold text-brand-400 bg-brand-500/10 px-2 py-1 rounded">Top MCap</span>
+            <!-- Right Column (Span 4): Radar Scanner -->
+            <div class="lg:col-span-4 glass-panel rounded-2xl flex flex-col h-[694px] animate-slide-up delay-400">
+                <div class="px-5 py-3 border-b border-brand-500/20 bg-black/40 flex justify-between items-center">
+                    <h3 class="text-xs font-mono font-bold text-white tracking-widest flex items-center gap-2">
+                        <i data-lucide="radar" class="w-4 h-4 text-brand-500 animate-pulse-glow"></i> LIVE FEED
+                    </h3>
+                    <div class="flex items-center gap-2">
+                        <div class="radar-box !w-3 !h-3"><div class="radar-sweep"></div></div>
                     </div>
-                    <div class="flex-1 overflow-auto">
-                        <table class="w-full text-left text-sm whitespace-nowrap">
-                            <thead class="text-xs text-dark-text uppercase bg-[#0B0F19] sticky top-0 z-10">
-                                <tr>
-                                    <th class="px-4 py-3 font-semibold w-8">#</th>
-                                    <th class="px-4 py-3 font-semibold">Asset</th>
-                                    <th class="px-4 py-3 font-semibold text-right">Price</th>
-                                    <th class="px-4 py-3 font-semibold text-right">Vol 24h</th>
-                                </tr>
-                            </thead>
-                            <tbody id="watchlist" class="divide-y divide-dark-border text-gray-300 font-mono text-xs">
-                                <tr><td colspan="4" class="px-6 py-8 text-center text-dark-text italic">Initializing market scan...</td></tr>
-                            </tbody>
-                        </table>
+                </div>
+                
+                <div class="bg-black/20 px-4 py-2 border-b border-brand-500/10 flex justify-between items-center text-[9px] font-mono text-slate-500">
+                    <span>SORT: VOLUME DESC</span>
+                    <span>TICKER M15/H1/H4</span>
+                </div>
+
+                <div class="flex-1 overflow-auto custom-scrollbar p-2">
+                    <div id="watchlist" class="flex flex-col gap-1.5">
+                        <!-- Items rendered here -->
+                        <div class="flex items-center justify-center h-full text-slate-500 flex-col gap-3">
+                            <div class="relative w-16 h-16">
+                                <div class="absolute inset-0 border-2 border-brand-500/20 rounded-full animate-ping"></div>
+                                <div class="absolute inset-2 border border-brand-500/40 rounded-full animate-spin-slow"></div>
+                                <i data-lucide="satellite" class="w-6 h-6 text-brand-500 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"></i>
+                            </div>
+                            <p class="text-[10px] font-mono tracking-widest animate-pulse">ESTABLISHING UPLINK...</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -256,135 +464,215 @@
         </div>
     </div>
 
+    <!-- SCRIPT LOGIC -->
     <script>
+        // Initialize Lucide Icons
+        lucide.createIcons();
+
+        // Helper: Format large numbers to M/K format
+        function formatVol(val) {
+            if (val >= 1e6) return (val / 1e6).toFixed(2) + 'M';
+            if (val >= 1e3) return (val / 1e3).toFixed(1) + 'K';
+            return val.toFixed(0);
+        }
+
+        // Helper: Highlight element change
+        function flashElement(el, newValue, isHTML=false) {
+            const current = isHTML ? el.innerHTML : el.textContent;
+            if (current !== newValue) {
+                if(isHTML) el.innerHTML = newValue; else el.textContent = newValue;
+                // Remove and re-add class to trigger animation reflow
+                el.classList.remove('flash-update');
+                void el.offsetWidth; // trigger reflow
+                el.classList.add('flash-update');
+            }
+        }
+
         async function refresh() {
             try {
                 const r = await fetch('/api/state');
                 const d = await r.json();
 
-                // Status
+                // System Status
                 const statusEl = document.getElementById('status');
-                const dotEl = document.getElementById('status-dot');
-                statusEl.textContent = d.status;
                 if(d.status === 'SCANNING') {
-                    statusEl.className = 'text-xs font-bold uppercase tracking-wider text-brand-400';
-                    dotEl.className = 'w-2.5 h-2.5 rounded-full bg-brand-500 pulse-dot';
+                    flashElement(statusEl, 'SYS_SCANNING');
+                    statusEl.className = 'text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-brand-400';
                 } else if(d.status === 'ERROR') {
-                    statusEl.className = 'text-xs font-bold uppercase tracking-wider text-accent-red';
-                    dotEl.className = 'w-2.5 h-2.5 rounded-full bg-accent-red';
+                    flashElement(statusEl, 'SYS_ERROR');
+                    statusEl.className = 'text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-rose-500';
                 } else {
-                    statusEl.className = 'text-xs font-bold uppercase tracking-wider text-accent-green';
-                    dotEl.className = 'w-2.5 h-2.5 rounded-full bg-accent-green';
+                    flashElement(statusEl, 'SYS_STANDBY');
+                    statusEl.className = 'text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-emerald-400';
                 }
 
-                document.getElementById('scan-count').textContent = `Scan #${d.scans}`;
+                flashElement(document.getElementById('scan-count'), `CYCLE ${d.scans.toString().padStart(4, '0')}`);
                 
-                // Metrics
-                document.getElementById('equity').textContent = `$${(d.equity||0).toFixed(2)}`;
+                // KPIs
+                flashElement(document.getElementById('equity'), `$${(d.equity||0).toFixed(2)}`);
                 
                 const bal = d.balance || {};
-                document.getElementById('uta-avail').textContent = `$${(bal.uta_available||0).toFixed(2)}`;
-                document.getElementById('fund-avail').textContent = `$${(bal.fund_equity||0).toFixed(2)}`;
+                flashElement(document.getElementById('uta-avail'), `$${(bal.uta_available||0).toFixed(2)}`);
+                flashElement(document.getElementById('fund-avail'), `$${(bal.fund_equity||0).toFixed(2)}`);
 
                 const s = d.stats || {};
-                document.getElementById('winrate').textContent = `${(s.win_rate||0).toFixed(1)}%`;
-                document.getElementById('wins').textContent = s.wins||0;
-                document.getElementById('losses').textContent = s.losses||0;
+                flashElement(document.getElementById('winrate'), `${(s.win_rate||0).toFixed(1)}%`);
+                flashElement(document.getElementById('wins'), s.wins||0);
+                flashElement(document.getElementById('losses'), s.losses||0);
 
                 const pnl = s.total_pnl || 0;
                 const pnlEl = document.getElementById('total-pnl');
-                pnlEl.textContent = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(4)}`;
-                pnlEl.className = pnl >= 0 ? 'text-3xl font-mono font-bold text-glow-green' : 'text-3xl font-mono font-bold text-glow-red';
+                flashElement(pnlEl, `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(4)}`);
+                pnlEl.className = pnl >= 0 ? 'text-4xl font-mono font-bold text-glow-green data-val' : 'text-4xl font-mono font-bold text-glow-red data-val';
 
-                document.getElementById('total-trades').textContent = s.total_trades||0;
-                document.getElementById('signals').textContent = d.signals_found||0;
-                document.getElementById('scan-info').textContent = (d.alpha_coins||[]).length;
+                flashElement(document.getElementById('total-trades'), s.total_trades||0);
+                flashElement(document.getElementById('signals'), d.signals_found||0);
+                flashElement(document.getElementById('scan-info'), d.total_symbols||0);
 
-                // Open positions
-                const posEl = document.getElementById('pos-list');
-                const ops = d.open_positions || [];
-                if (ops.length === 0) {
-                    posEl.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-dark-text italic">No open positions</td></tr>';
+                // Open Positions
+                const pList = document.getElementById('pos-list');
+                const positions = d.open_positions || [];
+                if (positions.length === 0) {
+                    pList.innerHTML = `<tr><td colspan="5" class="px-6 py-12 text-center text-slate-500">
+                                        <div class="flex flex-col items-center justify-center gap-3">
+                                            <i data-lucide="hexagon" class="w-8 h-8 text-slate-700"></i>
+                                            <p class="text-[10px] tracking-[0.2em] uppercase">Awaiting tactical entry...</p>
+                                        </div>
+                                      </td></tr>`;
+                    lucide.createIcons();
                 } else {
-                    posEl.innerHTML = ops.map(p => `
-                        <tr class="table-row">
-                            <td class="px-6 py-3 font-semibold text-white">
-                                <span class="bg-accent-green/10 text-accent-green px-1.5 py-0.5 rounded mr-2">LONG</span>
-                                ${p.bybit_symbol}
-                            </td>
-                            <td class="px-6 py-3">${p.entry_price?.toFixed(6)||'-'}</td>
-                            <td class="px-6 py-3 text-dark-text">
-                                <span class="text-accent-red">${p.sl_price?.toFixed(4)||'-'}</span> / 
-                                <span class="text-accent-green">${p.tp_price?.toFixed(4)||'-'}</span>
-                            </td>
-                            <td class="px-6 py-3">${p.leverage}x</td>
-                            <td class="px-6 py-3 text-right">
-                                <div class="inline-flex items-center gap-1.5">
-                                    <div class="w-16 h-1.5 bg-dark-border rounded-full overflow-hidden">
-                                        <div class="h-full bg-brand-500" style="width: ${p.alpha_pct||0}%"></div>
+                    let pHTML = '';
+                    positions.forEach(p => {
+                        const sideColor = p.side === 'Buy' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-rose-400 bg-rose-500/10 border-rose-500/20';
+                        const pnlColor = p.unrealised_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
+                        pHTML += `
+                            <tr class="hover:bg-brand-500/5 transition-colors group">
+                                <td class="px-5 py-4">
+                                    <div class="flex items-center gap-2">
+                                        <span class="px-1.5 py-0.5 rounded border ${sideColor} text-[10px] font-bold">${p.side.substring(0,1)}</span>
+                                        <span class="font-bold text-white group-hover:text-brand-400 transition-colors">${p.symbol}</span>
                                     </div>
-                                    <span class="text-brand-400 font-semibold">${p.alpha_pct?.toFixed(1)||0}%</span>
+                                </td>
+                                <td class="px-5 py-4 text-slate-300">
+                                    $${parseFloat(p.entry_price).toFixed(4)}
+                                    <div class="${pnlColor} text-[10px] mt-0.5 font-bold drop-shadow-md">
+                                        ${p.unrealised_pnl >= 0 ? '+' : ''}$${parseFloat(p.unrealised_pnl).toFixed(2)}
+                                    </div>
+                                </td>
+                                <td class="px-5 py-4 text-[10px] leading-tight">
+                                    <div class="text-rose-400">SL: $${parseFloat(p.sl).toFixed(4)}</div>
+                                    <div class="text-emerald-400">TP: $${parseFloat(p.tp).toFixed(4)}</div>
+                                </td>
+                                <td class="px-5 py-4 text-slate-400">${p.leverage}x</td>
+                                <td class="px-5 py-4 text-right">
+                                    <div class="flex items-center justify-end gap-2">
+                                        <div class="w-16 h-1.5 bg-black rounded-full overflow-hidden border border-brand-500/20">
+                                            <div class="h-full bg-brand-500 shadow-[0_0_5px_#f59e0b]" style="width: ${p.confidence || 80}%"></div>
+                                        </div>
+                                        <span class="text-brand-400 font-bold">${p.confidence || '-'}</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    if (pList.innerHTML !== pHTML) pList.innerHTML = pHTML;
+                }
+
+                // Trade History
+                const tList = document.getElementById('trades-list');
+                const trades = d.recent_trades || [];
+                if (trades.length === 0) {
+                    tList.innerHTML = `<tr><td colspan="5" class="px-6 py-12 text-center text-slate-500">
+                                        <div class="flex flex-col items-center justify-center gap-3">
+                                            <i data-lucide="server-crash" class="w-8 h-8 text-slate-700"></i>
+                                            <p class="text-[10px] tracking-[0.2em] uppercase">Database empty</p>
+                                        </div>
+                                      </td></tr>`;
+                    lucide.createIcons();
+                } else {
+                    let tHTML = '';
+                    trades.forEach(t => {
+                        const pnlColor = t.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
+                        tHTML += `
+                            <tr class="hover:bg-brand-500/5 transition-colors">
+                                <td class="px-5 py-3 text-slate-500">#${t.id}</td>
+                                <td class="px-5 py-3 font-bold text-white">${t.symbol}</td>
+                                <td class="px-5 py-3 text-[10px]">
+                                    <span class="text-slate-400">$${t.entry_price}</span>
+                                    <i data-lucide="arrow-right" class="w-3 h-3 inline mx-1 text-brand-500/50"></i>
+                                    <span class="text-white">$${t.exit_price}</span>
+                                </td>
+                                <td class="px-5 py-3 text-right font-bold ${pnlColor}">
+                                    ${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(4)}
+                                </td>
+                                <td class="px-5 py-3 text-right">
+                                    <span class="px-2 py-1 bg-black/50 border border-slate-700 rounded text-[9px] text-slate-400 uppercase">${t.exit_reason}</span>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    if (tList.innerHTML !== tHTML) {
+                        tList.innerHTML = tHTML;
+                        lucide.createIcons();
+                    }
+                }
+
+                // Live Feed (Watchlist) rendering as cyber-cards
+                const wList = document.getElementById('watchlist');
+                const wl = d.watchlist || [];
+                if (wl.length === 0) {
+                    wList.innerHTML = `<div class="flex items-center justify-center h-full text-slate-500 flex-col gap-3 py-10">
+                            <i data-lucide="satellite" class="w-6 h-6 text-slate-700"></i>
+                            <p class="text-[10px] font-mono tracking-widest">NO TARGETS IN RANGE</p>
+                        </div>`;
+                    lucide.createIcons();
+                } else {
+                    let wHTML = '';
+                    wl.forEach((c, idx) => {
+                        const trendColor = c.price_change_24h >= 0 ? 'text-emerald-400' : 'text-rose-400';
+                        const trendIcon = c.price_change_24h >= 0 ? 'trending-up' : 'trending-down';
+                        
+                        wHTML += `
+                            <div class="bg-black/30 border border-brand-500/10 rounded-lg p-2.5 flex items-center justify-between hover:bg-brand-500/10 hover:border-brand-500/30 transition-all cursor-pointer group">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-5 h-5 rounded bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-[9px] text-brand-400 group-hover:bg-brand-500 group-hover:text-black transition-colors">
+                                        ${idx + 1}
+                                    </div>
+                                    <div>
+                                        <div class="font-bold text-white text-xs">${c.base}</div>
+                                        <div class="text-[9px] text-slate-500">Vol: $${formatVol(c.volume_24h)}</div>
+                                    </div>
                                 </div>
-                            </td>
-                        </tr>
-                    `).join('');
+                                <div class="text-right">
+                                    <div class="text-xs text-white font-medium">$${c.last_price}</div>
+                                    <div class="text-[9px] ${trendColor} flex items-center justify-end gap-1">
+                                        <i data-lucide="${trendIcon}" class="w-3 h-3"></i>
+                                        ${c.price_change_24h >= 0 ? '+' : ''}${c.price_change_24h.toFixed(2)}%
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    if (wList.innerHTML !== wHTML) {
+                        wList.innerHTML = wHTML;
+                        lucide.createIcons();
+                    }
                 }
 
-                // Recent trades
-                const tradesEl = document.getElementById('trades-list');
-                const tr = (d.recent_trades || []).slice().sort((a, b) => b.id - a.id);
-                if (tr.length === 0) {
-                    tradesEl.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-dark-text italic">No trades executed yet</td></tr>';
-                } else {
-                    tradesEl.innerHTML = tr.map(t => {
-                        const p = t.pnl || 0;
-                        const pp = t.pnl_pct || 0;
-                        const ps = p >= 0 ? '+' : '';
-                        const pc = p >= 0 ? 'text-accent-green bg-accent-green/10' : 'text-accent-red bg-accent-red/10';
-                        return `
-                        <tr class="table-row">
-                            <td class="px-6 py-3 text-dark-text">#${t.id}</td>
-                            <td class="px-6 py-3 font-semibold text-white">${t.bybit_symbol}</td>
-                            <td class="px-6 py-3 text-dark-text">
-                                ${t.entry_price?.toFixed(6)||'-'} <span class="text-dark-border mx-1">→</span> ${t.exit_price?.toFixed(6)||'-'}
-                            </td>
-                            <td class="px-6 py-3 text-right">
-                                <span class="px-2 py-1 rounded font-semibold ${pc}">
-                                    ${ps}$${p.toFixed(4)}
-                                </span>
-                            </td>
-                            <td class="px-6 py-3 text-right text-dark-text capitalize">${t.close_reason?.replace(/_/g, ' ')||'--'}</td>
-                        </tr>
-                    `}).join('');
-                }
-
-                // Watchlist
-                const watchEl = document.getElementById('watchlist');
-                const ac = d.alpha_coins || [];
-                if (ac.length === 0) {
-                    watchEl.innerHTML = '<tr><td colspan="4" class="px-6 py-8 text-center text-dark-text italic">Scanning markets...</td></tr>';
-                } else {
-                    watchEl.innerHTML = ac.slice(0, 50).map((c, i) => {
-                        const chg = c.pct_change_24h || 0;
-                        const chgClass = chg >= 0 ? 'text-accent-green' : 'text-accent-red';
-                        const chgSign = chg >= 0 ? '+' : '';
-                        return `
-                        <tr class="table-row">
-                            <td class="px-4 py-2 text-dark-text">${i+1}</td>
-                            <td class="px-4 py-2 font-semibold text-white">
-                                ${c.base}
-                                <span class="text-[10px] ml-2 ${chgClass}">${chgSign}${chg.toFixed(1)}%</span>
-                            </td>
-                            <td class="px-4 py-2 text-right">$${c.price?.toFixed(c.price < 1 ? 6 : 2)}</td>
-                            <td class="px-4 py-2 text-right text-dark-text">$${(c.volume_24h/1e6)?.toFixed(1)}M</td>
-                        </tr>
-                    `}).join('');
-                }
-
-            } catch(e) { console.error('Refresh error:', e); }
+            } catch (e) {
+                console.error("Poll Error:", e);
+                const statusEl = document.getElementById('status');
+                statusEl.textContent = 'SYS_LINK_LOST';
+                statusEl.className = 'text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-rose-500 flash-update';
+            }
         }
-        setInterval(refresh, 3000);
+
+        // Initialize polling
         refresh();
+        setInterval(refresh, 3000);
     </script>
+    <style>
+        .animate-spin-slow { animation: spin 4s linear infinite; }
+    </style>
 </body>
 </html>

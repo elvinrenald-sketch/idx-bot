@@ -37,7 +37,7 @@ PIVOT_RIGHT    = 3     # [Tuned] Turunkan ke 3 agar entry lebih cepat tanpa meng
 MIN_HL_TOUCHES    = 2   # Minimal 2 higher low touches pada trendline
 MAX_HL_TOUCHES    = 4   # Maksimal 4 touches (lebih dari ini = stale pattern)
 MIN_HL_CANDLE_GAP = 3   # [Tuned] Jarak minimal antar HL agar bisa menangkap tren agresif
-MAX_RESISTANCE_RETEST = 5  # Maksimal 5x retest resistance untuk boleh entry
+MAX_RESISTANCE_RETEST = 4  # Maksimal 4x retest resistance untuk boleh entry
 
 # Accumulation Zone
 ACCUM_MIN_CANDLES   = 6      # Minimal 6 candle dalam zona akumulasi
@@ -50,6 +50,7 @@ BREAKOUT_CLOSE_ABOVE = True  # Candle harus CLOSE di atas resistance
 # Stochastic Filter
 STOCH_ENTRY_MIN     = 20     # Sweet spot mulai dari 20
 STOCH_ENTRY_MAX     = 50     # [Tuned] Naikkan sedikit ke 50 agar tidak ketinggalan kereta tren H1
+STOCH_ENTRY_GATE    = 50     # Entry HANYA jika Stoch %K < 50 (wajib untuk H1/H4, M15 cek H1/H4)
 
 # Trendline / Pullback Entry
 TRENDLINE_TOLERANCE_PCT = 1.2  # [FIX] Harga harus dalam 1.2% dari trendline HL (ketat)
@@ -130,6 +131,10 @@ SCAN_INTERVAL_SEC     = 60     # Scan setiap 1 menit (Real-time momentum)
 POSITION_CHECK_SEC    = 60     # Cek posisi setiap 1 menit
 MAX_ALPHA_COINS       = 30     # Max koin alpha yang di-deep scan
 RATE_LIMIT_DELAY      = 0.15   # Delay antar API call (150ms) untuk hindari rate limit
+
+# Market Cap Filter (CoinGecko)
+MARKETCAP_TOP_N       = 110    # Hanya scan koin dalam top 110 by market cap
+MARKETCAP_CACHE_SEC   = 3600   # Cache CoinGecko data selama 1 jam
 
 # ══════════════════════════════════════════════════════════════
 # DATABASE

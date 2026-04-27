@@ -6,3 +6,4 @@ ccxt==4.4.50
 pybit==5.9.0
 pandas==2.2.3
 numpy==2.1.0
+requests>=2.31.0

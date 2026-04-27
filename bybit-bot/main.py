@@ -12,6 +12,7 @@ import aiohttp
 from datetime import datetime
 from typing import Dict, List, Optional
 from contextlib import asynccontextmanager
+import pandas as pd
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -24,11 +25,12 @@ from config import (
     POSITION_CHECK_SEC, MAX_OPEN_POSITIONS, DATA_DIR, WEB_PORT,
     BYBIT_TESTNET, ACCUM_MAX_RANGE_PCT, VOLUME_BREAKOUT_MULT, STOCH_ENTRY_MIN,
     STOCH_ENTRY_MAX, SL_BUFFER_PCT, DEFAULT_RR_RATIO, TRIPLE_SCREEN_ENABLED,
-    NEW_LISTING_DAYS, MIN_H4_CANDLES_FOR_STRUCTURE, MIN_D1_CANDLES_FOR_STRUCTURE
+    NEW_LISTING_DAYS, MIN_H4_CANDLES_FOR_STRUCTURE, MIN_D1_CANDLES_FOR_STRUCTURE,
+    STOCH_ENTRY_GATE, STOCH_K, STOCH_SMOOTH_K, STOCH_D
 )
 import db
 from scanner import MarketScanner
-from strategy import analyze, is_pucuk, is_pump_candle, calc_atr
+from strategy import analyze, is_pucuk, is_pump_candle, calc_atr, calc_stochastic
 from risk_manager import calculate_leverage, calculate_position_size, calculate_trailing_sl
 from executor import BybitExecutor
 
@@ -340,8 +342,31 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                             df = ohlcv_data.get(tf)
                             if df is None or len(df) < 60:
                                 continue
+
+                            # ── Stochastic Gate (5,3,3) — Entry ONLY if %K < 50 ──
                             if tf == '15m':
-                                continue  # Skip M15, terlalu noisy
+                                # M15: Cek stoch H1 ATAU H4 — salah satu harus < 50
+                                h1_df = ohlcv_data.get('1h')
+                                h4_df = ohlcv_data.get('4h')
+                                stoch_pass = False
+                                for htf_label, htf_df in [('H1', h1_df), ('H4', h4_df)]:
+                                    if htf_df is not None and len(htf_df) >= 10:
+                                        sk, _ = calc_stochastic(htf_df, STOCH_K, STOCH_SMOOTH_K, STOCH_D)
+                                        k_val = sk.iloc[-1]
+                                        if not pd.isna(k_val) and k_val < STOCH_ENTRY_GATE:
+                                            stoch_pass = True
+                                            log.info(f"✅ STOCH M15 via {htf_label}: {coin['base']} %K={k_val:.1f} < {STOCH_ENTRY_GATE}")
+                                            break
+                                if not stoch_pass:
+                                    log.info(f"⛔ STOCH_GATE_REJECT M15: {coin['base']} — H1/H4 stoch >= {STOCH_ENTRY_GATE}")
+                                    continue
+                            else:
+                                # H1/H4: Cek stoch di TF sendiri — harus < 50
+                                sk, _ = calc_stochastic(df, STOCH_K, STOCH_SMOOTH_K, STOCH_D)
+                                k_val = sk.iloc[-1]
+                                if pd.isna(k_val) or k_val >= STOCH_ENTRY_GATE:
+                                    log.info(f"⛔ STOCH_GATE_REJECT {tf}: {coin['base']} %K={k_val:.1f} >= {STOCH_ENTRY_GATE}")
+                                    continue
 
                             signal = analyze(df, coin['symbol'], tf)
                             if signal:

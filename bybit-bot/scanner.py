@@ -4,6 +4,7 @@ Scans all Bybit USDT perpetual coins, detects Alpha (KALIMASADA-style).
 """
 import time
 import logging
+import requests
 import ccxt
 import pandas as pd
 from typing import List, Dict, Optional
@@ -15,7 +16,7 @@ from config import (
     MAX_ALPHA_COINS, RATE_LIMIT_DELAY, MIN_VOLUME_24H, MAX_VOLUME_24H, MIN_PRICE,
     MAX_SPREAD_PCT, BLACKLIST_SYMBOLS, VOLUME_ALPHA_THRESHOLD,
     BTC_VOLUME_MAX_RATIO, DECOUPLING_THRESHOLD, DECOUPLING_WINDOW_H,
-    NEW_LISTING_DAYS
+    NEW_LISTING_DAYS, MARKETCAP_TOP_N, MARKETCAP_CACHE_SEC
 )
 
 log = logging.getLogger('scanner')
@@ -41,6 +42,9 @@ class MarketScanner:
 
         self.markets_info: Dict[str, Dict] = {}
         self._markets_loaded = False
+        # CoinGecko market cap cache
+        self._mcap_symbols: set = set()
+        self._mcap_last_fetch: float = 0
 
     def load_markets(self):
         """Load all USDT linear perpetual markets from Bybit."""
@@ -251,6 +255,46 @@ class MarketScanner:
 
         return result
 
+    def _fetch_top_marketcap_symbols(self) -> set:
+        """
+        Fetch top N coins by market cap from CoinGecko (free API).
+        Returns a set of uppercase ticker symbols (e.g. {'BTC', 'ETH', 'SOL', ...}).
+        Results are cached for MARKETCAP_CACHE_SEC seconds.
+        """
+        now = time.time()
+        if self._mcap_symbols and (now - self._mcap_last_fetch) < MARKETCAP_CACHE_SEC:
+            return self._mcap_symbols  # Return cached
+
+        try:
+            symbols = set()
+            # CoinGecko returns max 250 per page; top 110 fits in 1 page
+            per_page = min(MARKETCAP_TOP_N, 250)
+            url = 'https://api.coingecko.com/api/v3/coins/markets'
+            params = {
+                'vs_currency': 'usd',
+                'order': 'market_cap_desc',
+                'per_page': per_page,
+                'page': 1,
+                'sparkline': 'false',
+            }
+            resp = requests.get(url, params=params, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+
+            for coin in data:
+                sym = coin.get('symbol', '').upper()
+                if sym:
+                    symbols.add(sym)
+
+            self._mcap_symbols = symbols
+            self._mcap_last_fetch = now
+            log.info(f"📊 CoinGecko top {MARKETCAP_TOP_N} market cap loaded: {len(symbols)} symbols")
+            return symbols
+
+        except Exception as e:
+            log.warning(f"CoinGecko API error: {e} — using cached or skipping filter")
+            return self._mcap_symbols  # Return old cache or empty set
+
     def scan_top_volume(self) -> List[Dict]:
         """
         Scan top 60 coins by 24h volume — TANPA filter alpha/pump.
@@ -271,6 +315,10 @@ class MarketScanner:
             return []
 
         candidates = []
+        # Fetch top market cap symbols for filtering
+        mcap_symbols = self._fetch_top_marketcap_symbols()
+        mcap_filtered = 0
+
         for symbol, ticker in tickers.items():
             if symbol not in self.markets_info:
                 continue
@@ -282,6 +330,11 @@ class MarketScanner:
                 if vol_24h < MIN_VOLUME_24H or vol_24h > MAX_VOLUME_24H or last_price < MIN_PRICE:
                     continue
                 if symbol in BLACKLIST_SYMBOLS:
+                    continue
+
+                # Market Cap Filter: only include coins in top N by market cap
+                if mcap_symbols and base.upper() not in mcap_symbols:
+                    mcap_filtered += 1
                     continue
 
                 bid = float(ticker.get('bid', 0) or 0)
@@ -313,7 +366,8 @@ class MarketScanner:
         candidates.sort(key=lambda x: x['volume_24h'], reverse=True)
         result = candidates[:60]
 
-        log.info(f"Volume scan: {len(candidates)} candidates → top {len(result)} by volume")
+        log.info(f"Volume scan: {len(candidates)} candidates → top {len(result)} by volume "
+                 f"(filtered {mcap_filtered} outside top-{MARKETCAP_TOP_N} mcap)")
         if result:
             top3 = ', '.join([f"{c['base']}(${c['volume_24h']/1e6:.0f}M)" for c in result[:3]])
             log.info(f"Top volume: {top3}")

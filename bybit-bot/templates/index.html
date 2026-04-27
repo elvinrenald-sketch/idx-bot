@@ -102,7 +102,7 @@
             font-size: 12px;
             border-bottom: 1px solid #21262d22;
         }
-        .trades-list { grid-column: 1 / -1; }
+        .trades-list { grid-column: 1 / -1; max-height: 500px; overflow-y: auto; }
         .trade-row {
             display: grid;
             grid-template-columns: 0.5fr 1fr 1fr 1fr 1fr 1.5fr;
@@ -240,16 +240,22 @@
                 if (tr.length === 0) {
                     tradesEl.innerHTML = '<div style="color:#8b949e;padding:8px 0;font-size:12px">No trades yet</div>';
                 } else {
-                    tradesEl.innerHTML = tr.map(t => `
+                    tradesEl.innerHTML = tr.map(t => {
+                        const pnl = t.pnl || 0;
+                        const pnlPct = t.pnl_pct || 0;
+                        const pnlSign = pnl >= 0 ? '+' : '';
+                        const pctSign = pnlPct >= 0 ? '+' : '';
+                        const pnlClass = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+                        return `
                         <div class="trade-row">
                             <div>#${t.id}</div>
                             <div>${t.bybit_symbol}</div>
                             <div>${t.entry_price?.toFixed(6)||'-'}</div>
                             <div>${t.exit_price?.toFixed(6)||'-'}</div>
-                            <div class="${t.pnl>=0?'pnl-pos':'pnl-neg'}">$${t.pnl?.toFixed(4)||'0'} (${t.pnl_pct?.toFixed(1)||'0'}%)</div>
+                            <div class="${pnlClass}">${pnlSign}$${pnl.toFixed(4)} (${pctSign}${pnlPct.toFixed(1)}%)</div>
                             <div>${t.close_reason||''}</div>
                         </div>
-                    `).join('');
+                    `}).join('');
                 }
 
             } catch(e) { console.error('Refresh error:', e); }

@@ -447,9 +447,15 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
                 ph_prices = [df['high'].iloc[i] for i in relevant_highs[-5:]]
                 ph_max = max(ph_prices)
                 ph_min = min(ph_prices)
-                # Cek apakah semua Pivot High berkumpul dalam toleransi 3%
+                last_ph = ph_prices[-1]
+                
+                # Cek apakah semua Pivot High berkumpul dalam toleransi 2%
                 spread_pct = ((ph_max - ph_min) / ph_max) * 100
-                if spread_pct <= FLAT_RESISTANCE_TOLERANCE and len(ph_prices) >= 2:
+                
+                # Pucuk terakhir HARUS mengetes resistance (tidak boleh membentuk lower high yang jauh)
+                distance_last_to_max = ((ph_max - last_ph) / ph_max) * 100
+                
+                if spread_pct <= FLAT_RESISTANCE_TOLERANCE and distance_last_to_max <= 1.0 and len(ph_prices) >= 2:
                     flat_resistance_valid = True
                     flat_resistance_level = (ph_max + ph_min) / 2
 

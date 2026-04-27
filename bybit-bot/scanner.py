@@ -332,8 +332,8 @@ class MarketScanner:
                 if symbol in BLACKLIST_SYMBOLS:
                     continue
 
-                # Market Cap Filter: only include coins in top N by market cap
-                if mcap_symbols and base.upper() not in mcap_symbols:
+                # Market Cap Filter: EXCLUDE top 110 — hanya scan koin KECIL di luar top 110
+                if mcap_symbols and base.upper() in mcap_symbols:
                     mcap_filtered += 1
                     continue
 

@@ -470,7 +470,7 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                 WEB.last_scan_time = datetime.utcnow().strftime('%H:%M:%S')
                 WEB.last_scan_ms = scan_ms
                 WEB.stats = db.get_stats()
-                WEB.recent_trades = db.get_recent_trades(10)
+                WEB.recent_trades = db.get_recent_trades(100)
                 WEB.open_positions = db.get_open_positions()
                 WEB.status = 'IDLE'
 
@@ -660,7 +660,7 @@ async def api_state():
         'balance': WEB.balance_info,
         'stats': WEB.stats,
         'open_positions': WEB.open_positions,
-        'alpha_coins': WEB.alpha_coins[:10],
+        'alpha_coins': WEB.alpha_coins[:30],
         'signals_found': WEB.signals_found,
         'recent_trades': WEB.recent_trades,
         'testnet': BYBIT_TESTNET,

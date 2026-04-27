@@ -88,21 +88,28 @@
             font-weight: 600;
         }
         .badge-long { background: #23863633; color: #3fb950; }
-        .badge-alpha { background: #1f6feb22; color: #58a6ff; }
-        .alpha-list {
-            max-height: 200px;
-            overflow-y: auto;
+        .badge-scan { background: #1f6feb22; color: #58a6ff; }
+        .badge-mcap { background: #f0883e22; color: #f0883e; }
+        .watchlist-section {
             grid-column: 1 / -1;
         }
-        .alpha-row {
+        .watchlist-scroll {
+            max-height: 250px;
+            overflow-y: auto;
+        }
+        .watch-row {
             display: grid;
-            grid-template-columns: 1fr 1fr 1fr 1fr;
+            grid-template-columns: 0.8fr 1fr 1fr 1fr 1fr;
             gap: 8px;
             padding: 6px 0;
             font-size: 12px;
             border-bottom: 1px solid #21262d22;
         }
-        .trades-list { grid-column: 1 / -1; max-height: 500px; overflow-y: auto; }
+        .trades-section { grid-column: 1 / -1; }
+        .trades-scroll {
+            max-height: 500px;
+            overflow-y: auto;
+        }
         .trade-row {
             display: grid;
             grid-template-columns: 0.5fr 1fr 1fr 1fr 1fr 1.5fr;
@@ -144,7 +151,7 @@
         <div class="card">
             <h3>📡 Scanner</h3>
             <div class="metric" id="signals">0 signals</div>
-            <div class="metric-sub" id="scan-info">Alpha: 0 coins</div>
+            <div class="metric-sub" id="scan-info">Scanning 0 coins</div>
         </div>
 
         <div class="card positions">
@@ -155,20 +162,20 @@
             <div id="pos-list"><div style="color:#8b949e;padding:12px 0;font-size:13px">No open positions</div></div>
         </div>
 
-        <div class="card alpha-list">
-            <h3>🔥 Top Alpha Coins (vs BTC)</h3>
-            <div class="alpha-row pos-header">
-                <div>Coin</div><div>Alpha</div><div>24h Change</div><div>Volume</div>
+        <div class="card watchlist-section">
+            <h3>🔍 Bot Watchlist — Price Action + Volume Scan (Top 110 MCap)</h3>
+            <div class="watch-row pos-header">
+                <div>#</div><div>Coin</div><div>Price</div><div>24h Change</div><div>Volume 24h</div>
             </div>
-            <div id="alpha-list"><div style="color:#8b949e;padding:8px 0;font-size:12px">Scanning...</div></div>
+            <div class="watchlist-scroll" id="watchlist"><div style="color:#8b949e;padding:8px 0;font-size:12px">Scanning...</div></div>
         </div>
 
-        <div class="card trades-list">
+        <div class="card trades-section">
             <h3>📜 Recent Trades</h3>
             <div class="trade-row pos-header">
                 <div>#</div><div>Symbol</div><div>Entry</div><div>Exit</div><div>PnL</div><div>Reason</div>
             </div>
-            <div id="trades-list"><div style="color:#8b949e;padding:8px 0;font-size:12px">No trades yet</div></div>
+            <div class="trades-scroll" id="trades-list"><div style="color:#8b949e;padding:8px 0;font-size:12px">No trades yet</div></div>
         </div>
     </div>
 
@@ -187,19 +194,18 @@
                     `<span title="Available for Trading">UTA: $${(bal.uta_available||0).toFixed(2)}</span> | ` +
                     `<span title="Funds in Funding Wallet" style="color: #8b949e">FUND: $${(bal.fund_equity||0).toFixed(2)}</span>`;
 
-
                 const s = d.stats || {};
                 document.getElementById('winrate').textContent = `${(s.win_rate||0).toFixed(1)}%`;
                 document.getElementById('wl').textContent = `W: ${s.wins||0} / L: ${s.losses||0}`;
 
                 const pnl = s.total_pnl || 0;
                 const pnlEl = document.getElementById('total-pnl');
-                pnlEl.textContent = `$${pnl.toFixed(4)}`;
+                pnlEl.textContent = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(4)}`;
                 pnlEl.className = 'metric ' + (pnl >= 0 ? 'green' : 'red');
 
                 document.getElementById('total-trades').textContent = `${s.total_trades||0} trades`;
                 document.getElementById('signals').textContent = `${d.signals_found||0} signals`;
-                document.getElementById('scan-info').textContent = `Alpha: ${(d.alpha_coins||[]).length} coins`;
+                document.getElementById('scan-info').textContent = `Scanning ${(d.alpha_coins||[]).length} coins (top 110 mcap)`;
 
                 // Open positions
                 const posEl = document.getElementById('pos-list');
@@ -218,41 +224,46 @@
                     `).join('');
                 }
 
-                // Alpha coins
-                const alphaEl = document.getElementById('alpha-list');
+                // Bot Watchlist — coins being scanned by PA + volume
+                const watchEl = document.getElementById('watchlist');
                 const ac = d.alpha_coins || [];
                 if (ac.length === 0) {
-                    alphaEl.innerHTML = '<div style="color:#8b949e;padding:8px 0;font-size:12px">No alpha coins detected</div>';
+                    watchEl.innerHTML = '<div style="color:#8b949e;padding:8px 0;font-size:12px">Waiting for next scan cycle...</div>';
                 } else {
-                    alphaEl.innerHTML = ac.slice(0, 15).map(c => `
-                        <div class="alpha-row">
-                            <div><span class="badge badge-alpha">${c.base}</span></div>
-                            <div style="color:#3fb950">+${c.alpha?.toFixed(1)}%</div>
-                            <div>${c.pct_change_24h?.toFixed(1)}%</div>
+                    watchEl.innerHTML = ac.slice(0, 30).map((c, i) => {
+                        const chg = c.pct_change_24h || 0;
+                        const chgClass = chg >= 0 ? 'pnl-pos' : 'pnl-neg';
+                        const chgSign = chg >= 0 ? '+' : '';
+                        return `
+                        <div class="watch-row">
+                            <div style="color:#8b949e">${i+1}</div>
+                            <div><span class="badge badge-scan">${c.base}</span></div>
+                            <div>$${c.price?.toFixed(c.price < 1 ? 6 : 2)}</div>
+                            <div class="${chgClass}">${chgSign}${chg.toFixed(1)}%</div>
                             <div>$${(c.volume_24h/1e6)?.toFixed(1)}M</div>
                         </div>
-                    `).join('');
+                    `}).join('');
                 }
 
-                // Recent trades
+                // Recent trades — sorted ascending by id so #1 is at top
                 const tradesEl = document.getElementById('trades-list');
-                const tr = d.recent_trades || [];
+                const tr = (d.recent_trades || []).slice().sort((a, b) => a.id - b.id);
                 if (tr.length === 0) {
                     tradesEl.innerHTML = '<div style="color:#8b949e;padding:8px 0;font-size:12px">No trades yet</div>';
                 } else {
                     tradesEl.innerHTML = tr.map(t => {
-                        const pnl = t.pnl || 0;
-                        const pnlPct = t.pnl_pct || 0;
-                        const pnlSign = pnl >= 0 ? '+' : '';
-                        const pctSign = pnlPct >= 0 ? '+' : '';
-                        const pnlClass = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+                        const p = t.pnl || 0;
+                        const pp = t.pnl_pct || 0;
+                        const ps = p >= 0 ? '+' : '';
+                        const pps = pp >= 0 ? '+' : '';
+                        const pc = p >= 0 ? 'pnl-pos' : 'pnl-neg';
                         return `
                         <div class="trade-row">
                             <div>#${t.id}</div>
                             <div>${t.bybit_symbol}</div>
                             <div>${t.entry_price?.toFixed(6)||'-'}</div>
                             <div>${t.exit_price?.toFixed(6)||'-'}</div>
-                            <div class="${pnlClass}">${pnlSign}$${pnl.toFixed(4)} (${pctSign}${pnlPct.toFixed(1)}%)</div>
+                            <div class="${pc}">${ps}$${p.toFixed(4)} (${pps}${pp.toFixed(1)}%)</div>
                             <div>${t.close_reason||''}</div>
                         </div>
                     `}).join('');

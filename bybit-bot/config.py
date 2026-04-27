@@ -92,7 +92,7 @@ TRIPLE_SCREEN_ENABLED  = True  # Align M15 with H1 & H4 trends
 # RISK MANAGEMENT
 # ══════════════════════════════════════════════════════════════
 RISK_PER_TRADE_PCT = 3.0     # Risiko 3% equity per trade
-MAX_OPEN_POSITIONS = 3       # Maksimal 3 posisi terbuka
+MAX_OPEN_POSITIONS = 6       # Maksimal 6 posisi terbuka
 MIN_LEVERAGE       = 3       # Leverage minimum
 MAX_LEVERAGE       = 10      # Leverage maksimum
 DEFAULT_RR_RATIO   = 2.0     # Risk:Reward = 1:2 (TP = 2x jarak SL)

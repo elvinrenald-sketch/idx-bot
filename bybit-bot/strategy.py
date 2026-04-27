@@ -584,9 +584,9 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         hl_prices = [round(df['low'].iloc[i], 6) for i in hl_indices]
 
         if near_trendline:
-            entry_type = 'HL_TRENDLINE_TOUCH'
+            entry_type = 'ASC_TRIANGLE_TRENDLINE'
         else:
-            entry_type = 'RESISTANCE_3X_RETEST'
+            entry_type = 'ASC_TRIANGLE_RETEST'
 
         vol_sma = calc_volume_sma(df, 20)
 

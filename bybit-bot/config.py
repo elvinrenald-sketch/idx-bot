@@ -49,7 +49,6 @@ TRENDLINE_TOLERANCE_PCT = 1.2  # [FIX] Harga harus dalam 1.2% dari trendline HL 
 DEMAND_TOLERANCE_PCT    = 1.5  # Harga harus dalam 1.5% dari demand zone
 
 # Pucuk Protector (H4/D1) — [FIX v3] Lebih ketat
-PUCUK_STOCH_THRESHOLD   = 75   # [FIX] Turunkan dari 80 ke 75 agar menangkap pump lebih awal
 PUCUK_SMA_DISTANCE_PCT  = 4.0  # [FIX] Turunkan dari 8% ke 4% — ZEC pump 7% TIDAK tertangkap di 8%
 
 # Pump Candle Detector (BARU)

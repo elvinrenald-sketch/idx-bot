@@ -35,8 +35,9 @@ PIVOT_RIGHT    = 3     # [Tuned] Turunkan ke 3 agar entry lebih cepat tanpa meng
 
 # Higher Low
 MIN_HL_TOUCHES    = 2   # Minimal 2 higher low touches pada trendline
-MAX_HL_TOUCHES    = 5   # Maksimal 5 touches
+MAX_HL_TOUCHES    = 4   # Maksimal 4 touches (lebih dari ini = stale pattern)
 MIN_HL_CANDLE_GAP = 3   # [Tuned] Jarak minimal antar HL agar bisa menangkap tren agresif
+MAX_RESISTANCE_RETEST = 5  # Maksimal 5x retest resistance untuk boleh entry
 
 # Accumulation Zone
 ACCUM_MIN_CANDLES   = 6      # Minimal 6 candle dalam zona akumulasi

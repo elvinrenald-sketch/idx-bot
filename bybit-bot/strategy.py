@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 from config import (
-    PIVOT_LEFT, PIVOT_RIGHT, MIN_HL_TOUCHES, MAX_HL_TOUCHES, MIN_HL_CANDLE_GAP,
+    PIVOT_LEFT, PIVOT_RIGHT, MIN_HL_TOUCHES, MAX_HL_TOUCHES, MIN_HL_CANDLE_GAP, MAX_RESISTANCE_RETEST,
     ACCUM_MIN_CANDLES, ACCUM_MAX_RANGE_PCT,
     VOLUME_BREAKOUT_MULT, STOCH_K, STOCH_SMOOTH_K, STOCH_D,
     STOCH_ENTRY_MIN, STOCH_ENTRY_MAX, SL_BUFFER_PCT, DEFAULT_RR_RATIO,
@@ -522,7 +522,7 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         # Entry B: Flat resistance (demand zone) retest ke-3
         # Seperti chart DASH: harga naik ke $36 untuk ke-3 kalinya = ENTRY
         near_demand_3x = False
-        if retest_events >= 3 and len(hl_indices) >= 2:
+        if retest_events >= 3 and retest_events <= MAX_RESISTANCE_RETEST and len(hl_indices) >= 2:
             resistance_distance = ((current_price - flat_resistance_level) / flat_resistance_level) * 100
             # Harga harus DEKAT resistance (-3% sampai +0.5%)
             near_demand_3x = (-3.0 <= resistance_distance <= 0.5)

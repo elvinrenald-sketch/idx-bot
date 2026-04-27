@@ -312,15 +312,14 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                 slots = MAX_OPEN_POSITIONS - open_count
                 open_symbols = db.get_open_symbols()
 
+                # ── Step 3: ALWAYS scan top coins for watchlist ──────
+                all_coins = await asyncio.to_thread(scanner.scan_top_volume)
+                WEB.alpha_coins = all_coins
+
                 if slots <= 0:
                     log.info(f"Max positions ({MAX_OPEN_POSITIONS}) reached. Monitoring only.")
                     WEB.status = 'MAX_POSITIONS'
                 else:
-                    # ── Step 3: Scan top 60 coins by volume (v6 PURE PA) ──
-                    # TANPA alpha filter, TANPA pucuk, TANPA weather
-                    # Sama persis seperti v6 backtest yang +254.7%
-                    all_coins = await asyncio.to_thread(scanner.scan_top_volume)
-                    WEB.alpha_coins = all_coins
 
                     # ── Step 4: Pure PA — analyze() ascending triangle ──
                     signals = []

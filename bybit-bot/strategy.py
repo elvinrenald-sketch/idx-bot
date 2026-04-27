@@ -156,14 +156,14 @@ def detect_higher_lows(df: pd.DataFrame, pivot_indices: List[int],
                        min_touches: int = MIN_HL_TOUCHES,
                        max_touches: int = MAX_HL_TOUCHES) -> Tuple[bool, List[int]]:
     """
-    Check if pivot lows form a series of higher lows.
+    Check if pivot lows form a series of higher lows (using fractal body prices).
     Returns (is_valid, list_of_hl_indices).
     Need at least `min_touches` consecutive higher lows.
     """
     if len(pivot_indices) < 2:
         return False, []
 
-    lows = df['low'].values
+    body_lows = df[['open', 'close']].min(axis=1).values
 
     # Find longest consecutive higher-low sequence ending near the latest candles
     best_seq = []
@@ -178,7 +178,7 @@ def detect_higher_lows(df: pd.DataFrame, pivot_indices: List[int],
         if (curr_idx - prev_idx) < MIN_HL_CANDLE_GAP:
             continue
 
-        if lows[curr_idx] > lows[prev_idx]:
+        if body_lows[curr_idx] > body_lows[prev_idx]:
             current_seq.append(curr_idx)
         else:
             if len(current_seq) > len(best_seq):
@@ -432,10 +432,10 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         resistance_tolerance = flat_resistance_level * 0.015  # 1.5% tolerance
 
         for k in range(first_hl_idx, len(df)):
-            candle_high = df['high'].iloc[k]
+            candle_body_high = max(df['open'].iloc[k], df['close'].iloc[k])
             candle_close = df['close'].iloc[k]
-            # Harga menyentuh zona resistance (dari bawah)
-            if candle_high >= flat_resistance_level - resistance_tolerance:
+            # Harga menyentuh zona resistance (dari bawah) berdasarkan body
+            if candle_body_high >= flat_resistance_level - resistance_tolerance:
                 if candle_close <= flat_resistance_level * 1.01:  # Belum breakout
                     resistance_retest_count += 1
 
@@ -444,8 +444,8 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         retest_events = 0
         in_zone = False
         for k in range(first_hl_idx, len(df)):
-            candle_high = df['high'].iloc[k]
-            near_resistance = candle_high >= flat_resistance_level - resistance_tolerance
+            candle_body_high = max(df['open'].iloc[k], df['close'].iloc[k])
+            near_resistance = candle_body_high >= flat_resistance_level - resistance_tolerance
             if near_resistance and not in_zone:
                 retest_events += 1
                 in_zone = True
@@ -863,7 +863,7 @@ def analyze_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dic
 def _calc_trendline_value(df: pd.DataFrame, hl_indices: List[int]) -> Optional[float]:
     """
     Calculate the expected trendline price at the current candle
-    by linearly extrapolating the last 2 higher lows.
+    by linearly extrapolating the last 2 higher lows (using fractal body prices).
     
     [FIX #6] Proyeksi dibatasi maks 10 candle dari HL terakhir.
     Proyeksi terlalu jauh menghasilkan nilai yang tidak akurat dan menyesatkan.
@@ -873,8 +873,8 @@ def _calc_trendline_value(df: pd.DataFrame, hl_indices: List[int]) -> Optional[f
 
     idx1 = hl_indices[-2]
     idx2 = hl_indices[-1]
-    price1 = df['low'].iloc[idx1]
-    price2 = df['low'].iloc[idx2]
+    price1 = min(df['open'].iloc[idx1], df['close'].iloc[idx1])
+    price2 = min(df['open'].iloc[idx2], df['close'].iloc[idx2])
 
     if idx2 == idx1:
         return price2

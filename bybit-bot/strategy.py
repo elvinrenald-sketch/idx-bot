@@ -426,6 +426,11 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         if candle_span <= 0:
             return None
         slope_per_candle = (last_hl_price - first_hl_price) / candle_span
+        slope_pct_per_candle = (slope_per_candle / first_hl_price) * 100
+
+        # Minta trendline NAIK TAPI TIDAK TERLALU NUKIK (max slope 0.5% per candle)
+        if slope_pct_per_candle > 0.5:
+            return None  # Terlalu curam / nukik ke atas
 
         # -- Step 3b: FLAT RESISTANCE (Atap Datar) --
         # Ascending Triangle: Pivot High cluster di level yang HAMPIR sama
@@ -458,8 +463,14 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         # Cek: jarak HL ke Resistance semakin menyempit (kompresi aktif)
         gap_first_to_resistance = ((flat_resistance_level - first_hl_price) / flat_resistance_level) * 100
         gap_last_to_resistance = ((flat_resistance_level - last_hl_price) / flat_resistance_level) * 100
+        
         if gap_last_to_resistance >= gap_first_to_resistance:
             return None  # Triangle tidak menyempit = bukan kompresi
+            
+        # Minta Jarak HL terakhir ke demand/resistance TIDAK TERLALU JAUH (max 4.5%)
+        # Semakin kecil persentasenya, semakin ketat kompresinya
+        if gap_last_to_resistance > 4.5:
+            return None  # Jarak HL ke resistance masih terlalu jauh (kurang menyempit)
 
         # ALPHA: Hitung compression percentage (untuk filter downstream)
         compression_pct = 0.0

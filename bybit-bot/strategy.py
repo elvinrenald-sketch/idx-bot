@@ -429,8 +429,8 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
 
         # -- Step 3b: FLAT RESISTANCE (Atap Datar) --
         # Ascending Triangle: Pivot High cluster di level yang HAMPIR sama
-        # Di real market, resistance tidak 100% flat — toleransi 5%
-        FLAT_RESISTANCE_TOLERANCE = 5.0  # max 5% perbedaan antar Pivot High
+        # Di real market, resistance tidak 100% flat — toleransi 2%
+        FLAT_RESISTANCE_TOLERANCE = 2.0  # max 2% perbedaan antar Pivot High
         flat_resistance_valid = False
         flat_resistance_level = None
 

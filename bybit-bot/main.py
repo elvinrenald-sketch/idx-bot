@@ -344,20 +344,22 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
 
                             # ── Stochastic Gate (5,3,3) — Entry ONLY if %K < 50 ──
                             if tf == '15m':
-                                # M15: Cek stoch H1 ATAU H4 — salah satu harus < 50
+                                # M15: Cek stoch H1 DAN H4 — KEDUANYA harus < 50
                                 h1_df = ohlcv_data.get('1h')
                                 h4_df = ohlcv_data.get('4h')
-                                stoch_pass = False
+                                stoch_pass = True
+                                checked_any = False
                                 for htf_label, htf_df in [('H1', h1_df), ('H4', h4_df)]:
                                     if htf_df is not None and len(htf_df) >= 10:
+                                        checked_any = True
                                         sk, _ = calc_stochastic(htf_df, STOCH_K, STOCH_SMOOTH_K, STOCH_D)
                                         k_val = sk.iloc[-1]
-                                        if not pd.isna(k_val) and k_val < STOCH_ENTRY_GATE:
-                                            stoch_pass = True
-                                            log.info(f"✅ STOCH M15 via {htf_label}: {coin['base']} %K={k_val:.1f} < {STOCH_ENTRY_GATE}")
+                                        if pd.isna(k_val) or k_val >= STOCH_ENTRY_GATE:
+                                            stoch_pass = False
+                                            log.info(f"⛔ STOCH_GATE_REJECT M15: {coin['base']} — {htf_label} stoch >= {STOCH_ENTRY_GATE}")
                                             break
-                                if not stoch_pass:
-                                    log.info(f"⛔ STOCH_GATE_REJECT M15: {coin['base']} — H1/H4 stoch >= {STOCH_ENTRY_GATE}")
+                                
+                                if not checked_any or not stoch_pass:
                                     continue
                             else:
                                 # H1/H4: Cek stoch di TF sendiri — harus < 50

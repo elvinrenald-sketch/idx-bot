@@ -11,8 +11,8 @@ from typing import Optional, Dict, List, Tuple
 from config import (
     PIVOT_LEFT, PIVOT_RIGHT, MIN_HL_TOUCHES, MAX_HL_TOUCHES, MIN_HL_CANDLE_GAP, MAX_RESISTANCE_RETEST,
     ACCUM_MIN_CANDLES, ACCUM_MAX_RANGE_PCT,
-    VOLUME_BREAKOUT_MULT, STOCH_K, STOCH_SMOOTH_K, STOCH_D,
-    STOCH_ENTRY_MIN, STOCH_ENTRY_MAX, SL_BUFFER_PCT, DEFAULT_RR_RATIO,
+    VOLUME_BREAKOUT_MULT,
+    SL_BUFFER_PCT, DEFAULT_RR_RATIO,
     TRENDLINE_TOLERANCE_PCT, DEMAND_TOLERANCE_PCT,
     PUCUK_STOCH_THRESHOLD, PUCUK_SMA_DISTANCE_PCT,
     MIN_H4_CANDLES_FOR_STRUCTURE, MIN_D1_CANDLES_FOR_STRUCTURE,
@@ -27,21 +27,7 @@ log = logging.getLogger('strategy')
 # INDICATORS — Hand-coded, zero external TA dependencies
 # ══════════════════════════════════════════════════════════════
 
-def calc_stochastic(df: pd.DataFrame, k: int = 5, smooth_k: int = 3,
-                    d: int = 3) -> Tuple[pd.Series, pd.Series]:
-    """
-    Stochastic Oscillator (%K, %D).
-    Settings: (5, 3, 3) — fast, responsive to momentum shifts.
-    """
-    low_min = df['low'].rolling(window=k, min_periods=k).min()
-    high_max = df['high'].rolling(window=k, min_periods=k).max()
-    denominator = high_max - low_min
-    # Avoid division by zero
-    denominator = denominator.replace(0, np.nan)
-    fast_k = 100.0 * (df['close'] - low_min) / denominator
-    slow_k = fast_k.rolling(window=smooth_k, min_periods=1).mean()
-    slow_d = slow_k.rolling(window=d, min_periods=1).mean()
-    return slow_k, slow_d
+
 
 
 def calc_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
@@ -65,10 +51,10 @@ def calc_volume_sma(df: pd.DataFrame, period: int = 20) -> pd.Series:
 def detect_pivot_lows(df: pd.DataFrame, left: int = PIVOT_LEFT,
                       right: int = PIVOT_RIGHT) -> List[int]:
     """
-    Detect pivot low points.
-    A pivot low at index i means: low[i] <= all lows in window [i-left : i+right].
+    Detect pivot low points based on fractal body analysis.
+    A pivot low at index i means: body_low[i] <= all body_lows in window [i-left : i+right].
     """
-    lows = df['low'].values
+    lows = df[['open', 'close']].min(axis=1).values
     n = len(lows)
     pivots = []
 
@@ -92,8 +78,8 @@ def detect_pivot_lows(df: pd.DataFrame, left: int = PIVOT_LEFT,
 
 def detect_pivot_highs(df: pd.DataFrame, left: int = PIVOT_LEFT,
                        right: int = PIVOT_RIGHT) -> List[int]:
-    """Detect pivot high points."""
-    highs = df['high'].values
+    """Detect pivot high points based on fractal body analysis."""
+    highs = df[['open', 'close']].max(axis=1).values
     n = len(highs)
     pivots = []
 
@@ -326,54 +312,7 @@ def check_breakout(df: pd.DataFrame, resistance: float,
 # STOCHASTIC CONFIRMATION
 # ══════════════════════════════════════════════════════════════
 
-def check_stochastic(stoch_k: pd.Series, stoch_d: pd.Series) -> Tuple[bool, Dict]:
-    """
-    Stochastic confirmation for entry (Sweet Spot 20-38):
-    1. MUST be a Bullish Cross (%K crosses above %D).
-    2. Value MUST be between 20 and 38 (The 'Sweet Spot').
-    3. Skip if already above 38 (Too late) or Crossing Down.
 
-    Returns (is_confirmed, details).
-    """
-    if len(stoch_k) < 3:
-        return False, {}
-
-    k_now = stoch_k.iloc[-1]
-    d_now = stoch_d.iloc[-1]
-    k_prev = stoch_k.iloc[-2]
-    d_prev = stoch_d.iloc[-2]
-
-    if pd.isna(k_now) or pd.isna(d_now):
-        return False, {}
-
-    details = {
-        'stoch_k': round(k_now, 1),
-        'stoch_d': round(d_now, 1),
-        'signal': '',
-    }
-
-    # 1. Condition: Bullish Cross (%K was below D, now above D)
-    is_bullish_cross = (k_prev <= d_prev) and (k_now > d_now)
-    
-    # 2. Condition: Within Sweet Spot (20 to 38)
-    # Using STOCH_ENTRY_MIN (20) and STOCH_ENTRY_MAX (38)
-    is_in_sweet_spot = (k_now >= STOCH_ENTRY_MIN) and (k_now <= STOCH_ENTRY_MAX)
-
-    if is_bullish_cross and is_in_sweet_spot:
-        details['signal'] = 'BULLISH_CROSS_SWEET_SPOT'
-        return True, details
-    
-    # Rationale for Rejection (for logs)
-    if k_now > STOCH_ENTRY_MAX:
-        details['signal'] = 'REJECT_OVEREXTENDED'
-    elif k_now < d_now:
-        details['signal'] = 'REJECT_BEARISH_STATE'
-    elif not is_bullish_cross:
-        details['signal'] = 'REJECT_NO_CROSS'
-    else:
-        details['signal'] = 'REJECT_OUT_OF_RANGE'
-
-    return False, details
 
 
 # ══════════════════════════════════════════════════════════════
@@ -413,11 +352,12 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         if not has_hl or len(hl_indices) < 2:
             return None  # Butuh minimal 2 HL
 
-        # -- Step 3: ASCENDING SLOPE --
+        # -- Step 3: ASCENDING SLOPE (ANTI-NUKIK) --
         first_hl_idx = hl_indices[0]
         last_hl_idx = hl_indices[-1]
-        first_hl_price = df['low'].iloc[first_hl_idx]
-        last_hl_price = df['low'].iloc[last_hl_idx]
+        # Use body prices (min of open/close) for fractal analysis instead of raw wicks
+        first_hl_price = min(df['open'].iloc[first_hl_idx], df['close'].iloc[first_hl_idx])
+        last_hl_price = min(df['open'].iloc[last_hl_idx], df['close'].iloc[last_hl_idx])
 
         if last_hl_price <= first_hl_price:
             return None  # Trendline TIDAK naik
@@ -428,7 +368,7 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         slope_per_candle = (last_hl_price - first_hl_price) / candle_span
         slope_pct_per_candle = (slope_per_candle / first_hl_price) * 100
 
-        # Minta trendline NAIK TAPI TIDAK TERLALU NUKIK (max slope 0.5% per candle)
+        # Anti-Nukik Logic: Ensure slope is <= 45 degrees (approx 0.5% per candle max)
         if slope_pct_per_candle > 0.5:
             return None  # Terlalu curam / nukik ke atas
 
@@ -532,20 +472,30 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         # -- Step 6: ENTRY CONDITIONS --
         # Entry A: HL ke-2+ trendline touch (pullback ke ascending trendline)
         near_trendline = False
-        if trendline_price and trendline_price > 0 and len(hl_indices) >= 2:
+        if trendline_price and trendline_price > 0 and MIN_HL_TOUCHES <= len(hl_indices) <= MAX_HL_TOUCHES:
             distance_pct = ((current_price - trendline_price) / trendline_price) * 100
             near_trendline = (-1.5 <= distance_pct <= 2.5)
 
-        # Entry B: Flat resistance (demand zone) retest ke-3
+        # Entry B: Flat resistance (demand zone) retest ke-2+
         # Seperti chart DASH: harga naik ke $36 untuk ke-3 kalinya = ENTRY
         near_demand_3x = False
-        if retest_events >= 3 and retest_events <= MAX_RESISTANCE_RETEST and len(hl_indices) >= 2:
+        if 2 <= retest_events <= MAX_RESISTANCE_RETEST and MIN_HL_TOUCHES <= len(hl_indices) <= MAX_HL_TOUCHES:
             resistance_distance = ((current_price - flat_resistance_level) / flat_resistance_level) * 100
             # Harga harus DEKAT resistance (-3% sampai +0.5%)
             near_demand_3x = (-3.0 <= resistance_distance <= 0.5)
 
         if not near_trendline and not near_demand_3x:
             return None
+            
+        # -- Step 6.5: VOLUME CONFIRMATION --
+        # Replace stochastic with a strict 1.5x - 2.0x volume multiplier of SMA 20
+        vol_sma = calc_volume_sma(df, 20)
+        vol_ratio_1 = df['volume'].iloc[-1] / vol_sma.iloc[-1] if vol_sma.iloc[-1] > 0 else 1.0
+        vol_ratio_2 = df['volume'].iloc[-2] / vol_sma.iloc[-2] if vol_sma.iloc[-2] > 0 else 1.0
+        max_vol_ratio = max(vol_ratio_1, vol_ratio_2)
+        
+        if max_vol_ratio < VOLUME_BREAKOUT_MULT:
+            return None  # Volume not confirming the bounce/entry
 
         # -- Step 7: MAX RISE FILTER --
         recent_high = df['high'].iloc[-30:].max()

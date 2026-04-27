@@ -3,179 +3,256 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bybit Alpha Bot</title>
+    <title>Bybit Terminal | Bounce Strategy</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#eff6ff',
+                            100: '#dbeafe',
+                            400: '#60a5fa',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            900: '#1e3a8a',
+                        },
+                        dark: {
+                            bg: '#0B0F19',
+                            card: '#131A2A',
+                            border: '#1E293B',
+                            text: '#94A3B8',
+                            heading: '#F8FAFC'
+                        },
+                        accent: {
+                            green: '#10B981',
+                            green_glow: 'rgba(16, 185, 129, 0.2)',
+                            red: '#F43F5E',
+                            red_glow: 'rgba(244, 63, 94, 0.2)'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            background: #0a0e17;
-            color: #e0e6ed;
-            min-height: 100vh;
+            background-color: #0B0F19;
+            color: #F8FAFC;
+            -webkit-font-smoothing: antialiased;
         }
-        .header {
-            background: linear-gradient(135deg, #1a1f2e 0%, #0d1117 100%);
-            border-bottom: 1px solid #21262d;
-            padding: 16px 24px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        .glass-card {
+            background: #131A2A;
+            border: 1px solid #1E293B;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
-        .header h1 { font-size: 18px; color: #58a6ff; }
-        .header .status {
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
+        .glass-card:hover {
+            border-color: #334155;
+            box-shadow: 0 8px 30px -4px rgba(0, 0, 0, 0.6);
         }
-        .status-scanning { background: #1f6feb33; color: #58a6ff; }
-        .status-idle { background: #23863633; color: #3fb950; }
-        .status-error { background: #da363433; color: #f85149; }
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 16px;
-            padding: 20px;
+        .text-glow-green {
+            text-shadow: 0 0 16px rgba(16, 185, 129, 0.4);
+            color: #10B981;
         }
-        .card {
-            background: #161b22;
-            border: 1px solid #21262d;
-            border-radius: 12px;
-            padding: 16px;
+        .text-glow-red {
+            text-shadow: 0 0 16px rgba(244, 63, 94, 0.4);
+            color: #F43F5E;
         }
-        .card h3 {
-            font-size: 13px;
-            color: #8b949e;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 12px;
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
         }
-        .metric {
-            font-size: 28px;
-            font-weight: 700;
-            color: #f0f6fc;
+        ::-webkit-scrollbar-track {
+            background: transparent;
         }
-        .metric.green { color: #3fb950; }
-        .metric.red { color: #f85149; }
-        .metric-sub {
-            font-size: 13px;
-            color: #8b949e;
-            margin-top: 4px;
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
         }
-        .stat-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 0;
-            border-bottom: 1px solid #21262d22;
-            font-size: 14px;
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
         }
-        .stat-row:last-child { border: none; }
-        .stat-label { color: #8b949e; }
-        .positions { grid-column: 1 / -1; }
-        .pos-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
-            gap: 8px;
-            padding: 10px 0;
-            border-bottom: 1px solid #21262d44;
-            font-size: 13px;
+        .table-row {
+            transition: background-color 0.15s ease;
         }
-        .pos-header { color: #8b949e; font-weight: 600; font-size: 11px; text-transform: uppercase; }
-        .badge {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 6px;
-            font-size: 11px;
-            font-weight: 600;
+        .table-row:hover {
+            background-color: rgba(30, 41, 59, 0.5);
         }
-        .badge-long { background: #23863633; color: #3fb950; }
-        .badge-scan { background: #1f6feb22; color: #58a6ff; }
-        .badge-mcap { background: #f0883e22; color: #f0883e; }
-        .watchlist-section {
-            grid-column: 1 / -1;
+        .pulse-dot {
+            animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
-        .watchlist-scroll {
-            max-height: 250px;
-            overflow-y: auto;
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5); }
+            70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
         }
-        .watch-row {
-            display: grid;
-            grid-template-columns: 0.8fr 1fr 1fr 1fr 1fr;
-            gap: 8px;
-            padding: 6px 0;
-            font-size: 12px;
-            border-bottom: 1px solid #21262d22;
-        }
-        .trades-section { grid-column: 1 / -1; }
-        .trades-scroll {
-            max-height: 500px;
-            overflow-y: auto;
-        }
-        .trade-row {
-            display: grid;
-            grid-template-columns: 0.5fr 1fr 1fr 1fr 1fr 1.5fr;
-            gap: 8px;
-            padding: 8px 0;
-            font-size: 12px;
-            border-bottom: 1px solid #21262d22;
-        }
-        .pnl-pos { color: #3fb950; }
-        .pnl-neg { color: #f85149; }
-        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .scanning { animation: pulse 1.5s ease-in-out infinite; }
     </style>
 </head>
-<body>
-    <div class="header">
-        <h1>🤖 Bybit Alpha Bot</h1>
-        <div>
-            <span id="scan-count" style="margin-right: 12px; font-size: 13px; color: #8b949e;">Scan #0</span>
-            <span id="status" class="status status-idle">STARTING</span>
-        </div>
-    </div>
-    <div class="grid">
-        <div class="card">
-            <h3>💰 Equity</h3>
-            <div class="metric" id="equity">$0.00</div>
-            <div class="metric-sub" id="available">Available: $0.00</div>
-        </div>
-        <div class="card">
-            <h3>📊 Win Rate</h3>
-            <div class="metric" id="winrate">0%</div>
-            <div class="metric-sub" id="wl">W: 0 / L: 0</div>
-        </div>
-        <div class="card">
-            <h3>💵 Total PnL</h3>
-            <div class="metric" id="total-pnl">$0.00</div>
-            <div class="metric-sub" id="total-trades">0 trades</div>
-        </div>
-        <div class="card">
-            <h3>📡 Scanner</h3>
-            <div class="metric" id="signals">0 signals</div>
-            <div class="metric-sub" id="scan-info">Scanning 0 coins</div>
+<body class="min-h-screen p-4 md:p-8 font-sans">
+    
+    <div class="max-w-7xl mx-auto space-y-6">
+        
+        <!-- Header -->
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-center pb-6 border-b border-dark-border gap-4">
+            <div class="flex items-center gap-4">
+                <div class="w-10 h-10 rounded-xl bg-brand-500/20 border border-brand-500/30 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight text-white">Bybit Terminal</h1>
+                    <p class="text-sm text-dark-text mt-0.5 font-medium flex items-center gap-2">
+                        <span class="inline-block w-2 h-2 rounded-full bg-brand-400"></span>
+                        PA & Volume Bounce Strategy
+                    </p>
+                </div>
+            </div>
+            <div class="flex items-center gap-4 bg-dark-card border border-dark-border py-2 px-4 rounded-full">
+                <div class="flex items-center gap-2">
+                    <div id="status-dot" class="w-2.5 h-2.5 rounded-full bg-brand-500 pulse-dot"></div>
+                    <span id="status" class="text-xs font-bold uppercase tracking-wider text-brand-400">SCANNING</span>
+                </div>
+                <div class="w-px h-4 bg-dark-border"></div>
+                <span id="scan-count" class="text-xs font-mono text-dark-text">Scan #0</span>
+            </div>
+        </header>
+
+        <!-- KPI Metrics Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <!-- Equity -->
+            <div class="glass-card p-6">
+                <h3 class="text-xs font-semibold text-dark-text uppercase tracking-wider mb-2">Total Equity</h3>
+                <div class="flex items-baseline gap-1">
+                    <span class="text-3xl font-mono font-bold text-white" id="equity">$0.00</span>
+                </div>
+                <div class="mt-4 flex items-center justify-between text-xs font-mono">
+                    <span class="text-dark-text">UTA: <span id="uta-avail" class="text-white">$0.00</span></span>
+                    <span class="text-dark-text">Fund: <span id="fund-avail" class="text-white">$0.00</span></span>
+                </div>
+            </div>
+
+            <!-- Total PnL -->
+            <div class="glass-card p-6">
+                <h3 class="text-xs font-semibold text-dark-text uppercase tracking-wider mb-2">Total PnL</h3>
+                <div class="flex items-baseline gap-1">
+                    <span class="text-3xl font-mono font-bold" id="total-pnl">$0.00</span>
+                </div>
+                <div class="mt-4 text-xs font-mono text-dark-text">
+                    <span id="total-trades" class="font-medium text-white">0</span> total trades executed
+                </div>
+            </div>
+
+            <!-- Win Rate -->
+            <div class="glass-card p-6">
+                <h3 class="text-xs font-semibold text-dark-text uppercase tracking-wider mb-2">Win Rate</h3>
+                <div class="flex items-baseline gap-1">
+                    <span class="text-3xl font-mono font-bold text-white" id="winrate">0.0%</span>
+                </div>
+                <div class="mt-4 flex items-center gap-4 text-xs font-mono">
+                    <span class="text-accent-green bg-accent-green/10 px-2 py-0.5 rounded">W: <span id="wins">0</span></span>
+                    <span class="text-accent-red bg-accent-red/10 px-2 py-0.5 rounded">L: <span id="losses">0</span></span>
+                </div>
+            </div>
+
+            <!-- Scanner Status -->
+            <div class="glass-card p-6">
+                <h3 class="text-xs font-semibold text-dark-text uppercase tracking-wider mb-2">Active Signals</h3>
+                <div class="flex items-baseline gap-1">
+                    <span class="text-3xl font-mono font-bold text-brand-400" id="signals">0</span>
+                </div>
+                <div class="mt-4 text-xs font-mono text-dark-text">
+                    Scanning <span id="scan-info" class="text-white font-medium">0</span> pairs
+                </div>
+            </div>
         </div>
 
-        <div class="card positions">
-            <h3>📋 Open Positions</h3>
-            <div class="pos-row pos-header">
-                <div>Symbol</div><div>Entry</div><div>Leverage</div><div>SL / TP</div><div>Status</div>
-            </div>
-            <div id="pos-list"><div style="color:#8b949e;padding:12px 0;font-size:13px">No open positions</div></div>
-        </div>
+        <!-- Main Content Area -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Left Column: Positions & Trades -->
+            <div class="lg:col-span-2 space-y-6">
+                
+                <!-- Open Positions -->
+                <div class="glass-card overflow-hidden flex flex-col h-[300px]">
+                    <div class="px-6 py-4 border-b border-dark-border bg-[#0E131F]">
+                        <h3 class="text-sm font-semibold text-white">Active Positions</h3>
+                    </div>
+                    <div class="flex-1 overflow-auto">
+                        <table class="w-full text-left text-sm whitespace-nowrap">
+                            <thead class="text-xs text-dark-text uppercase bg-[#0B0F19] sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-6 py-3 font-semibold">Symbol</th>
+                                    <th class="px-6 py-3 font-semibold">Entry</th>
+                                    <th class="px-6 py-3 font-semibold">SL / TP</th>
+                                    <th class="px-6 py-3 font-semibold">Lev</th>
+                                    <th class="px-6 py-3 font-semibold text-right">Confidence</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pos-list" class="divide-y divide-dark-border text-gray-300 font-mono text-xs">
+                                <tr><td colspan="5" class="px-6 py-8 text-center text-dark-text italic">No open positions</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
 
-        <div class="card watchlist-section">
-            <h3>🔍 Bot Watchlist — PA + Volume Scan (Below Top 110 MCap)</h3>
-            <div class="watch-row pos-header">
-                <div>#</div><div>Coin</div><div>Price</div><div>24h Change</div><div>Volume 24h</div>
-            </div>
-            <div class="watchlist-scroll" id="watchlist"><div style="color:#8b949e;padding:8px 0;font-size:12px">Scanning...</div></div>
-        </div>
+                <!-- Recent Trades -->
+                <div class="glass-card overflow-hidden flex flex-col h-[400px]">
+                    <div class="px-6 py-4 border-b border-dark-border bg-[#0E131F]">
+                        <h3 class="text-sm font-semibold text-white">Trade History</h3>
+                    </div>
+                    <div class="flex-1 overflow-auto">
+                        <table class="w-full text-left text-sm whitespace-nowrap">
+                            <thead class="text-xs text-dark-text uppercase bg-[#0B0F19] sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-6 py-3 font-semibold">#</th>
+                                    <th class="px-6 py-3 font-semibold">Symbol</th>
+                                    <th class="px-6 py-3 font-semibold">Entry → Exit</th>
+                                    <th class="px-6 py-3 font-semibold text-right">PnL</th>
+                                    <th class="px-6 py-3 font-semibold text-right">Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody id="trades-list" class="divide-y divide-dark-border text-gray-300 font-mono text-xs">
+                                <tr><td colspan="5" class="px-6 py-8 text-center text-dark-text italic">No trades executed yet</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
 
-        <div class="card trades-section">
-            <h3>📜 Recent Trades</h3>
-            <div class="trade-row pos-header">
-                <div>#</div><div>Symbol</div><div>Entry</div><div>Exit</div><div>PnL</div><div>Reason</div>
             </div>
-            <div class="trades-scroll" id="trades-list"><div style="color:#8b949e;padding:8px 0;font-size:12px">No trades yet</div></div>
+
+            <!-- Right Column: Watchlist -->
+            <div class="space-y-6">
+                <div class="glass-card overflow-hidden flex flex-col h-[724px]">
+                    <div class="px-6 py-4 border-b border-dark-border bg-[#0E131F] flex justify-between items-center">
+                        <h3 class="text-sm font-semibold text-white">Live Scanner</h3>
+                        <span class="text-[10px] uppercase font-bold text-brand-400 bg-brand-500/10 px-2 py-1 rounded">Top MCap</span>
+                    </div>
+                    <div class="flex-1 overflow-auto">
+                        <table class="w-full text-left text-sm whitespace-nowrap">
+                            <thead class="text-xs text-dark-text uppercase bg-[#0B0F19] sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-4 py-3 font-semibold w-8">#</th>
+                                    <th class="px-4 py-3 font-semibold">Asset</th>
+                                    <th class="px-4 py-3 font-semibold text-right">Price</th>
+                                    <th class="px-4 py-3 font-semibold text-right">Vol 24h</th>
+                                </tr>
+                            </thead>
+                            <tbody id="watchlist" class="divide-y divide-dark-border text-gray-300 font-mono text-xs">
+                                <tr><td colspan="4" class="px-6 py-8 text-center text-dark-text italic">Initializing market scan...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </div>
 
@@ -185,93 +262,128 @@
                 const r = await fetch('/api/state');
                 const d = await r.json();
 
-                document.getElementById('status').textContent = d.status;
-                document.getElementById('status').className = 'status status-' + (d.status === 'SCANNING' ? 'scanning' : d.status === 'ERROR' ? 'error' : 'idle');
-                document.getElementById('scan-count').textContent = `Scan #${d.scans} (${d.last_scan_ms}ms)`;
+                // Status
+                const statusEl = document.getElementById('status');
+                const dotEl = document.getElementById('status-dot');
+                statusEl.textContent = d.status;
+                if(d.status === 'SCANNING') {
+                    statusEl.className = 'text-xs font-bold uppercase tracking-wider text-brand-400';
+                    dotEl.className = 'w-2.5 h-2.5 rounded-full bg-brand-500 pulse-dot';
+                } else if(d.status === 'ERROR') {
+                    statusEl.className = 'text-xs font-bold uppercase tracking-wider text-accent-red';
+                    dotEl.className = 'w-2.5 h-2.5 rounded-full bg-accent-red';
+                } else {
+                    statusEl.className = 'text-xs font-bold uppercase tracking-wider text-accent-green';
+                    dotEl.className = 'w-2.5 h-2.5 rounded-full bg-accent-green';
+                }
+
+                document.getElementById('scan-count').textContent = `Scan #${d.scans}`;
+                
+                // Metrics
                 document.getElementById('equity').textContent = `$${(d.equity||0).toFixed(2)}`;
+                
                 const bal = d.balance || {};
-                document.getElementById('available').innerHTML = 
-                    `<span title="Available for Trading">UTA: $${(bal.uta_available||0).toFixed(2)}</span> | ` +
-                    `<span title="Funds in Funding Wallet" style="color: #8b949e">FUND: $${(bal.fund_equity||0).toFixed(2)}</span>`;
+                document.getElementById('uta-avail').textContent = `$${(bal.uta_available||0).toFixed(2)}`;
+                document.getElementById('fund-avail').textContent = `$${(bal.fund_equity||0).toFixed(2)}`;
 
                 const s = d.stats || {};
                 document.getElementById('winrate').textContent = `${(s.win_rate||0).toFixed(1)}%`;
-                document.getElementById('wl').textContent = `W: ${s.wins||0} / L: ${s.losses||0}`;
+                document.getElementById('wins').textContent = s.wins||0;
+                document.getElementById('losses').textContent = s.losses||0;
 
                 const pnl = s.total_pnl || 0;
                 const pnlEl = document.getElementById('total-pnl');
                 pnlEl.textContent = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(4)}`;
-                pnlEl.className = 'metric ' + (pnl >= 0 ? 'green' : 'red');
+                pnlEl.className = pnl >= 0 ? 'text-3xl font-mono font-bold text-glow-green' : 'text-3xl font-mono font-bold text-glow-red';
 
-                document.getElementById('total-trades').textContent = `${s.total_trades||0} trades`;
-                document.getElementById('signals').textContent = `${d.signals_found||0} signals`;
-                document.getElementById('scan-info').textContent = `Scanning ${(d.alpha_coins||[]).length} coins (top 110 mcap)`;
+                document.getElementById('total-trades').textContent = s.total_trades||0;
+                document.getElementById('signals').textContent = d.signals_found||0;
+                document.getElementById('scan-info').textContent = (d.alpha_coins||[]).length;
 
                 // Open positions
                 const posEl = document.getElementById('pos-list');
                 const ops = d.open_positions || [];
                 if (ops.length === 0) {
-                    posEl.innerHTML = '<div style="color:#8b949e;padding:12px 0;font-size:13px">No open positions</div>';
+                    posEl.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-dark-text italic">No open positions</td></tr>';
                 } else {
                     posEl.innerHTML = ops.map(p => `
-                        <div class="pos-row">
-                            <div><span class="badge badge-long">LONG</span> ${p.bybit_symbol}</div>
-                            <div>${p.entry_price?.toFixed(6)||'-'}</div>
-                            <div>${p.leverage}x</div>
-                            <div>SL: ${p.sl_price?.toFixed(4)||'-'} / TP: ${p.tp_price?.toFixed(4)||'-'}</div>
-                            <div>${p.timeframe} | α${p.alpha_pct?.toFixed(1)||0}%</div>
-                        </div>
+                        <tr class="table-row">
+                            <td class="px-6 py-3 font-semibold text-white">
+                                <span class="bg-accent-green/10 text-accent-green px-1.5 py-0.5 rounded mr-2">LONG</span>
+                                ${p.bybit_symbol}
+                            </td>
+                            <td class="px-6 py-3">${p.entry_price?.toFixed(6)||'-'}</td>
+                            <td class="px-6 py-3 text-dark-text">
+                                <span class="text-accent-red">${p.sl_price?.toFixed(4)||'-'}</span> / 
+                                <span class="text-accent-green">${p.tp_price?.toFixed(4)||'-'}</span>
+                            </td>
+                            <td class="px-6 py-3">${p.leverage}x</td>
+                            <td class="px-6 py-3 text-right">
+                                <div class="inline-flex items-center gap-1.5">
+                                    <div class="w-16 h-1.5 bg-dark-border rounded-full overflow-hidden">
+                                        <div class="h-full bg-brand-500" style="width: ${p.alpha_pct||0}%"></div>
+                                    </div>
+                                    <span class="text-brand-400 font-semibold">${p.alpha_pct?.toFixed(1)||0}%</span>
+                                </div>
+                            </td>
+                        </tr>
                     `).join('');
                 }
 
-                // Bot Watchlist — coins being scanned by PA + volume
-                const watchEl = document.getElementById('watchlist');
-                const ac = d.alpha_coins || [];
-                if (ac.length === 0) {
-                    watchEl.innerHTML = '<div style="color:#8b949e;padding:8px 0;font-size:12px">Waiting for next scan cycle...</div>';
-                } else {
-                    watchEl.innerHTML = ac.slice(0, 30).map((c, i) => {
-                        const chg = c.pct_change_24h || 0;
-                        const chgClass = chg >= 0 ? 'pnl-pos' : 'pnl-neg';
-                        const chgSign = chg >= 0 ? '+' : '';
-                        return `
-                        <div class="watch-row">
-                            <div style="color:#8b949e">${i+1}</div>
-                            <div><span class="badge badge-scan">${c.base}</span></div>
-                            <div>$${c.price?.toFixed(c.price < 1 ? 6 : 2)}</div>
-                            <div class="${chgClass}">${chgSign}${chg.toFixed(1)}%</div>
-                            <div>$${(c.volume_24h/1e6)?.toFixed(1)}M</div>
-                        </div>
-                    `}).join('');
-                }
-
-                // Recent trades — sorted ascending by id so #1 is at top
+                // Recent trades
                 const tradesEl = document.getElementById('trades-list');
-                const tr = (d.recent_trades || []).slice().sort((a, b) => a.id - b.id);
+                const tr = (d.recent_trades || []).slice().sort((a, b) => b.id - a.id);
                 if (tr.length === 0) {
-                    tradesEl.innerHTML = '<div style="color:#8b949e;padding:8px 0;font-size:12px">No trades yet</div>';
+                    tradesEl.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-dark-text italic">No trades executed yet</td></tr>';
                 } else {
                     tradesEl.innerHTML = tr.map(t => {
                         const p = t.pnl || 0;
                         const pp = t.pnl_pct || 0;
                         const ps = p >= 0 ? '+' : '';
-                        const pps = pp >= 0 ? '+' : '';
-                        const pc = p >= 0 ? 'pnl-pos' : 'pnl-neg';
+                        const pc = p >= 0 ? 'text-accent-green bg-accent-green/10' : 'text-accent-red bg-accent-red/10';
                         return `
-                        <div class="trade-row">
-                            <div>#${t.id}</div>
-                            <div>${t.bybit_symbol}</div>
-                            <div>${t.entry_price?.toFixed(6)||'-'}</div>
-                            <div>${t.exit_price?.toFixed(6)||'-'}</div>
-                            <div class="${pc}">${ps}$${p.toFixed(4)} (${pps}${pp.toFixed(1)}%)</div>
-                            <div>${t.close_reason||''}</div>
-                        </div>
+                        <tr class="table-row">
+                            <td class="px-6 py-3 text-dark-text">#${t.id}</td>
+                            <td class="px-6 py-3 font-semibold text-white">${t.bybit_symbol}</td>
+                            <td class="px-6 py-3 text-dark-text">
+                                ${t.entry_price?.toFixed(6)||'-'} <span class="text-dark-border mx-1">→</span> ${t.exit_price?.toFixed(6)||'-'}
+                            </td>
+                            <td class="px-6 py-3 text-right">
+                                <span class="px-2 py-1 rounded font-semibold ${pc}">
+                                    ${ps}$${p.toFixed(4)}
+                                </span>
+                            </td>
+                            <td class="px-6 py-3 text-right text-dark-text capitalize">${t.close_reason?.replace(/_/g, ' ')||'--'}</td>
+                        </tr>
+                    `}).join('');
+                }
+
+                // Watchlist
+                const watchEl = document.getElementById('watchlist');
+                const ac = d.alpha_coins || [];
+                if (ac.length === 0) {
+                    watchEl.innerHTML = '<tr><td colspan="4" class="px-6 py-8 text-center text-dark-text italic">Scanning markets...</td></tr>';
+                } else {
+                    watchEl.innerHTML = ac.slice(0, 50).map((c, i) => {
+                        const chg = c.pct_change_24h || 0;
+                        const chgClass = chg >= 0 ? 'text-accent-green' : 'text-accent-red';
+                        const chgSign = chg >= 0 ? '+' : '';
+                        return `
+                        <tr class="table-row">
+                            <td class="px-4 py-2 text-dark-text">${i+1}</td>
+                            <td class="px-4 py-2 font-semibold text-white">
+                                ${c.base}
+                                <span class="text-[10px] ml-2 ${chgClass}">${chgSign}${chg.toFixed(1)}%</span>
+                            </td>
+                            <td class="px-4 py-2 text-right">$${c.price?.toFixed(c.price < 1 ? 6 : 2)}</td>
+                            <td class="px-4 py-2 text-right text-dark-text">$${(c.volume_24h/1e6)?.toFixed(1)}M</td>
+                        </tr>
                     `}).join('');
                 }
 
             } catch(e) { console.error('Refresh error:', e); }
         }
-        setInterval(refresh, 5000);
+        setInterval(refresh, 3000);
         refresh();
     </script>
 </body>

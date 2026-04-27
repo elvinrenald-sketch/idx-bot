@@ -24,10 +24,6 @@ TIMEFRAMES          = ['15m', '1h', '4h']        # Scan pada M15, H1, H4
 PRIMARY_TIMEFRAME   = '1h'                        # Timeframe utama untuk entry
 CANDLE_LOOKBACK     = 150                         # Jumlah candle yang diambil
 
-# Stochastic Oscillator (5, 3, 3)
-STOCH_K        = 5
-STOCH_SMOOTH_K = 3
-STOCH_D        = 3
 
 # Pivot detection
 PIVOT_LEFT     = 5     # Candle ke kiri untuk mendeteksi pivot
@@ -43,14 +39,10 @@ MAX_RESISTANCE_RETEST = 4  # Maksimal 4x retest resistance untuk boleh entry
 ACCUM_MIN_CANDLES   = 6      # Minimal 6 candle dalam zona akumulasi
 ACCUM_MAX_RANGE_PCT = 7.2    # Range zona max 7.2% (kotak ungu)
 
-# Breakout Confirmation
-VOLUME_BREAKOUT_MULT = 1.3   # Volume harus ≥ 1.3x rata-rata 20 candle
+# Volume Confirmation
+VOLUME_BREAKOUT_MULT = 1.5   # Volume harus ≥ 1.5x rata-rata 20 candle
 BREAKOUT_CLOSE_ABOVE = True  # Candle harus CLOSE di atas resistance
 
-# Stochastic Filter
-STOCH_ENTRY_MIN     = 20     # Sweet spot mulai dari 20
-STOCH_ENTRY_MAX     = 50     # [Tuned] Naikkan sedikit ke 50 agar tidak ketinggalan kereta tren H1
-STOCH_ENTRY_GATE    = 50     # Entry HANYA jika Stoch %K < 50 (wajib untuk H1/H4, M15 cek H1/H4)
 
 # Trendline / Pullback Entry
 TRENDLINE_TOLERANCE_PCT = 1.2  # [FIX] Harga harus dalam 1.2% dari trendline HL (ketat)

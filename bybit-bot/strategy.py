@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 from typing import Optional, Dict, List, Tuple
 from config import (
-    PIVOT_LEFT, PIVOT_RIGHT, MIN_HL_TOUCHES, MAX_HL_TOUCHES, MIN_HL_CANDLE_GAP, MAX_RESISTANCE_RETEST,
+    PIVOT_LEFT, PIVOT_RIGHT, MIN_HL_TOUCHES, MAX_HL_TOUCHES, MIN_HL_CANDLE_GAP,
+    MAX_HL_CANDLE_GAP, MAX_HL_PRICE_JUMP_PCT, MAX_RESISTANCE_RETEST,
     ACCUM_MIN_CANDLES, ACCUM_MAX_RANGE_PCT,
     VOLUME_BREAKOUT_MULT,
     SL_BUFFER_PCT, DEFAULT_RR_RATIO,
@@ -159,6 +160,11 @@ def detect_higher_lows(df: pd.DataFrame, pivot_indices: List[int],
     Check if pivot lows form a series of higher lows (using fractal body prices).
     Returns (is_valid, list_of_hl_indices).
     Need at least `min_touches` consecutive higher lows.
+    
+    Guards:
+    - MIN_HL_CANDLE_GAP: consecutive HLs must be >= N candles apart (avoid noise)
+    - MAX_HL_CANDLE_GAP: consecutive HLs must be <= N candles apart (avoid disconnected HLs)
+    - MAX_HL_PRICE_JUMP_PCT: price between consecutive HLs must not jump > N% (avoid fake ascending)
     """
     if len(pivot_indices) < 2:
         return False, []
@@ -173,12 +179,34 @@ def detect_higher_lows(df: pd.DataFrame, pivot_indices: List[int],
         prev_idx = pivot_indices[i - 1]
         curr_idx = pivot_indices[i]
 
-        # [FIX #3] Jarak minimum antar HL harus >= MIN_HL_CANDLE_GAP candle
-        # Mencegah 3-4 candle berdekatan diakui sebagai HL palsu
-        if (curr_idx - prev_idx) < MIN_HL_CANDLE_GAP:
+        # [GUARD 1] Jarak MINIMUM antar HL harus >= MIN_HL_CANDLE_GAP candle
+        candle_gap = curr_idx - prev_idx
+        if candle_gap < MIN_HL_CANDLE_GAP:
+            continue
+
+        # [GUARD 2] Jarak MAXIMUM antar HL harus <= MAX_HL_CANDLE_GAP candle
+        # Jika terlalu jauh, HL tidak kohesif (bukan satu tren yang sama)
+        if candle_gap > MAX_HL_CANDLE_GAP:
+            # Reset sequence — start fresh from this point
+            if len(current_seq) > len(best_seq):
+                best_seq = current_seq[:]
+            current_seq = [curr_idx]
             continue
 
         if body_lows[curr_idx] > body_lows[prev_idx]:
+            # [GUARD 3] Loncatan harga antar HL tidak boleh terlalu besar
+            # Jika HL lompat > MAX_HL_PRICE_JUMP_PCT, itu bukan ascending yang gradual
+            prev_price = body_lows[prev_idx]
+            curr_price = body_lows[curr_idx]
+            if prev_price > 0:
+                price_jump_pct = ((curr_price - prev_price) / prev_price) * 100
+                if price_jump_pct > MAX_HL_PRICE_JUMP_PCT:
+                    # Loncatan terlalu besar — reset sequence
+                    if len(current_seq) > len(best_seq):
+                        best_seq = current_seq[:]
+                    current_seq = [curr_idx]
+                    continue
+
             current_seq.append(curr_idx)
         else:
             if len(current_seq) > len(best_seq):

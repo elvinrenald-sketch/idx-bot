@@ -404,21 +404,21 @@
                     tList.innerHTML = tHTML;
                 }
 
-                // Live Feed (Watchlist)
+                // Live Feed (Market Feed)
                 const wList = document.getElementById('watchlist');
-                const wl = d.watchlist || [];
+                const wl = d.alpha_coins || [];
                 if (wl.length === 0) {
                     wList.innerHTML = `<tr><td colspan="4" class="px-4 py-10 text-center text-ui-text">Establishing market feed...</td></tr>`;
                 } else {
                     let wHTML = '';
                     wl.forEach(c => {
-                        const trendColor = c.price_change_24h >= 0 ? 'text-trade-up' : 'text-trade-down';
+                        const trendColor = c.pct_change_24h >= 0 ? 'text-trade-up' : 'text-trade-down';
                         wHTML += `
                             <tr class="table-row">
                                 <td class="px-4 py-2 font-bold">${c.base}</td>
-                                <td class="px-4 py-2 text-right">$${c.last_price}</td>
+                                <td class="px-4 py-2 text-right">$${c.price}</td>
                                 <td class="px-4 py-2 text-right text-ui-text">${formatVol(c.volume_24h)}</td>
-                                <td class="px-4 py-2 text-right ${trendColor}">${c.price_change_24h >= 0 ? '+' : ''}${c.price_change_24h.toFixed(2)}%</td>
+                                <td class="px-4 py-2 text-right ${trendColor}">${c.pct_change_24h >= 0 ? '+' : ''}${c.pct_change_24h.toFixed(2)}%</td>
                             </tr>
                         `;
                     });

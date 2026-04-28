@@ -461,7 +461,27 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                 WEB.last_scan_ms = scan_ms
                 WEB.stats = db.get_stats()
                 WEB.recent_trades = db.get_recent_trades(100)
-                WEB.open_positions = db.get_open_positions()
+                # Get live data from Bybit to merge with DB positions
+                db_open = db.get_open_positions()
+                bybit_open = await asyncio.to_thread(executor.get_all_positions)
+                bybit_map = {p['symbol']: p for p in bybit_open}
+                
+                merged_positions = []
+                for p in db_open:
+                    live = bybit_map.get(p['bybit_symbol'], {})
+                    p['mark_price'] = live.get('mark_price', p['entry_price'])
+                    p['unrealized_pnl'] = live.get('unrealized_pnl', 0.0)
+                    p['size'] = live.get('size', p.get('qty', 0))
+                    
+                    try:
+                        sig = json.loads(p.get('signal_data', '{}'))
+                        p['confidence'] = sig.get('confidence', '-')
+                    except:
+                        p['confidence'] = '-'
+                        
+                    merged_positions.append(p)
+                
+                WEB.open_positions = merged_positions
                 WEB.status = 'IDLE'
 
                 db.log_scan(

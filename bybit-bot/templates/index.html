@@ -357,10 +357,9 @@
                     positions.forEach(p => {
                         const sideText = p.side === 'Buy' ? 'LONG' : 'SHORT';
                         const sideColor = p.side === 'Buy' ? 'text-trade-up' : 'text-trade-down';
-                        const pnlColor = p.unrealised_pnl >= 0 ? 'text-trade-up' : 'text-trade-down';
+                        const pnlColor = p.unrealized_pnl >= 0 ? 'text-trade-up' : 'text-trade-down';
                         
-                        // Fake a Mark Price for display realism if not provided
-                        const markPrice = p.entry_price * (1 + (p.unrealised_pnl / (p.size * p.entry_price || 1)));
+                        const markPrice = p.mark_price || p.entry_price;
 
                         pHTML += `
                             <tr class="table-row">
@@ -368,9 +367,9 @@
                                 <td class="px-4 py-2.5 font-bold">${p.symbol} <span class="text-ui-text font-normal text-[9px] ml-1">${p.leverage}x</span></td>
                                 <td class="px-4 py-2.5 text-right text-ui-text">${p.size || '-'}</td>
                                 <td class="px-4 py-2.5 text-right">$${parseFloat(p.entry_price).toFixed(4)}</td>
-                                <td class="px-4 py-2.5 text-right">$${markPrice.toFixed(4)}</td>
+                                <td class="px-4 py-2.5 text-right">$${parseFloat(markPrice).toFixed(4)}</td>
                                 <td class="px-4 py-2.5 text-right font-medium ${pnlColor}">
-                                    ${p.unrealised_pnl >= 0 ? '+' : ''}$${parseFloat(p.unrealised_pnl).toFixed(2)}
+                                    ${p.unrealized_pnl >= 0 ? '+' : ''}$${parseFloat(p.unrealized_pnl).toFixed(2)}
                                 </td>
                                 <td class="px-4 py-2.5 text-right text-brand-500">${p.confidence || '-'}</td>
                             </tr>

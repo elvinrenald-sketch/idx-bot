@@ -176,11 +176,12 @@ def detect_higher_lows(df: pd.DataFrame, pivot_indices: List[int],
     current_seq = [pivot_indices[0]]
 
     for i in range(1, len(pivot_indices)):
-        prev_idx = pivot_indices[i - 1]
         curr_idx = pivot_indices[i]
+        # Compare against the last HL in our BUILDING sequence, not the raw previous pivot
+        seq_last_idx = current_seq[-1]
 
         # [GUARD 1] Jarak MINIMUM antar HL harus >= MIN_HL_CANDLE_GAP candle
-        candle_gap = curr_idx - prev_idx
+        candle_gap = curr_idx - seq_last_idx
         if candle_gap < MIN_HL_CANDLE_GAP:
             continue
 
@@ -193,10 +194,10 @@ def detect_higher_lows(df: pd.DataFrame, pivot_indices: List[int],
             current_seq = [curr_idx]
             continue
 
-        if body_lows[curr_idx] > body_lows[prev_idx]:
+        if body_lows[curr_idx] > body_lows[seq_last_idx]:
             # [GUARD 3] Loncatan harga antar HL tidak boleh terlalu besar
             # Jika HL lompat > MAX_HL_PRICE_JUMP_PCT, itu bukan ascending yang gradual
-            prev_price = body_lows[prev_idx]
+            prev_price = body_lows[seq_last_idx]
             curr_price = body_lows[curr_idx]
             if prev_price > 0:
                 price_jump_pct = ((curr_price - prev_price) / prev_price) * 100
@@ -998,12 +999,12 @@ def _is_consolidating(df: pd.DataFrame, atr: pd.Series, lookback: int = 5) -> bo
 
 def is_pucuk(df: pd.DataFrame) -> bool:
     """
-    Pucuk Protector v3 — KETAT. Detect if price is at peak/pump.
+    Pucuk Protector v4 — PURE PRICE ACTION. Detect if price is at peak/pump.
     Used on H4 and D1 timeframes to block entries.
 
     Returns True if PUCUK (should REJECT entry) if ANY of:
-    1. Stochastic %K > 75 (Overbought) — turunkan dari 80
-    2. Price > 4% above SMA-20 (Overextended) — turunkan dari 8%
+    1. Inline Stochastic %K > 82 (Overbought) — hand-coded, zero dependency
+    2. Price > 7% above SMA-20 (Overextended)
     3. ANY of last 5 candles has body > 2.5x ATR (Pump candle)
     4. Price rose > 5% in last 5 candles (Rapid rise)
     """
@@ -1012,11 +1013,16 @@ def is_pucuk(df: pd.DataFrame) -> bool:
 
     current_price = df['close'].iloc[-1]
 
-    # Check 1: Stochastic overbought
-    stoch_k, _ = calc_stochastic(df, STOCH_K, STOCH_SMOOTH_K, STOCH_D)
-    k_now = stoch_k.iloc[-1]
-    if not pd.isna(k_now) and k_now > 82:
-        return True  # PUCUK: Stochastic overbought (82+)
+    # Check 1: Inline Stochastic %K overbought (hand-coded, no external function)
+    # Stochastic %K = (close - lowest_low_14) / (highest_high_14 - lowest_low_14) * 100
+    stoch_period = 14
+    if len(df) >= stoch_period:
+        lowest_low = df['low'].rolling(window=stoch_period).min().iloc[-1]
+        highest_high = df['high'].rolling(window=stoch_period).max().iloc[-1]
+        if not pd.isna(lowest_low) and not pd.isna(highest_high) and (highest_high - lowest_low) > 0:
+            k_now = ((current_price - lowest_low) / (highest_high - lowest_low)) * 100
+            if k_now > 82:
+                return True  # PUCUK: Stochastic overbought (82+)
 
     # Check 2: SMA distance (turunkan ke 4%)
     sma_20 = df['close'].rolling(window=20).mean().iloc[-1]

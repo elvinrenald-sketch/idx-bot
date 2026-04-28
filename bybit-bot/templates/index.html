@@ -386,17 +386,18 @@
                 } else {
                     let tHTML = '';
                     trades.forEach(t => {
-                        const pnlColor = t.pnl >= 0 ? 'text-trade-up' : 'text-trade-down';
+                        const tPnl = t.pnl || 0;
+                        const pnlColor = tPnl >= 0 ? 'text-trade-up' : 'text-trade-down';
                         tHTML += `
                             <tr class="table-row">
                                 <td class="px-4 py-2.5 text-ui-text">${t.id}</td>
                                 <td class="px-4 py-2.5 font-bold">${t.symbol}</td>
                                 <td class="px-4 py-2.5 text-right text-ui-text">$${t.entry_price}</td>
-                                <td class="px-4 py-2.5 text-right text-ui-text">$${t.exit_price}</td>
+                                <td class="px-4 py-2.5 text-right text-ui-text">$${t.exit_price || '-'}</td>
                                 <td class="px-4 py-2.5 text-right font-medium ${pnlColor}">
-                                    ${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(4)}
+                                    ${tPnl >= 0 ? '+' : ''}$${tPnl.toFixed(4)}
                                 </td>
-                                <td class="px-4 py-2.5 text-right text-[10px] text-ui-text uppercase">${t.exit_reason}</td>
+                                <td class="px-4 py-2.5 text-right text-[10px] text-ui-text uppercase">${t.close_reason || '-'}</td>
                             </tr>
                         `;
                     });

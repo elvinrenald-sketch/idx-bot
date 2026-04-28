@@ -35,6 +35,7 @@ MAX_HL_TOUCHES    = 4   # Maksimal 4 touches (lebih dari ini = stale pattern)
 MIN_HL_CANDLE_GAP = 3   # [Tuned] Jarak minimal antar HL agar bisa menangkap tren agresif
 MAX_HL_CANDLE_GAP = 40  # [NEW] Jarak MAKSIMAL antar HL berurutan (candle). >40 = HL terlalu jauh, bukan tren kohesif
 MAX_HL_PRICE_JUMP_PCT = 3.5  # [NEW] Loncatan harga MAX antar HL berurutan (%). >3.5% = bukan ascending gradual
+MIN_ASCENDING_RANGE_PCT = 1.0  # [NEW] Minimum jarak total HL pertama ke terakhir (%). <1% = bukan ascending, cuma noise
 MAX_RESISTANCE_RETEST = 4  # Maksimal 4x retest resistance untuk boleh entry
 
 # Accumulation Zone
@@ -85,7 +86,9 @@ TRIPLE_SCREEN_ENABLED  = True  # Align M15 with H1 & H4 trends
 # RISK MANAGEMENT
 # ══════════════════════════════════════════════════════════════
 RISK_PER_TRADE_PCT = 3.0     # Risiko 3% equity per trade
-MAX_OPEN_POSITIONS = 6       # Maksimal 6 posisi terbuka
+MAX_OPEN_POSITIONS = 3       # Maksimal 3 posisi terbuka
+MIN_EQUITY_FOR_TRADE = 5.5   # [NEW] Minimum equity $5.5 USDT untuk boleh trade. Jika di bawah = SKIP scan
+FAILED_SYMBOL_COOLDOWN = 10  # [NEW] Cooldown: skip simbol yang gagal selama 10 scan (~10 menit)
 MIN_LEVERAGE       = 3       # Leverage minimum
 MAX_LEVERAGE       = 10      # Leverage maksimum
 DEFAULT_RR_RATIO   = 2.0     # Risk:Reward = 1:2 (TP = 2x jarak SL)

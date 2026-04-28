@@ -25,11 +25,12 @@ from config import (
     POSITION_CHECK_SEC, MAX_OPEN_POSITIONS, DATA_DIR, WEB_PORT,
     BYBIT_TESTNET, ACCUM_MAX_RANGE_PCT, VOLUME_BREAKOUT_MULT,
     SL_BUFFER_PCT, DEFAULT_RR_RATIO, TRIPLE_SCREEN_ENABLED,
-    NEW_LISTING_DAYS, MIN_H4_CANDLES_FOR_STRUCTURE, MIN_D1_CANDLES_FOR_STRUCTURE
+    NEW_LISTING_DAYS, MIN_H4_CANDLES_FOR_STRUCTURE, MIN_D1_CANDLES_FOR_STRUCTURE,
+    MIN_EQUITY_FOR_TRADE, FAILED_SYMBOL_COOLDOWN,
 )
 import db
 from scanner import MarketScanner
-from strategy import analyze, is_pucuk, is_pump_candle, calc_atr
+from strategy import analyze, is_pucuk, is_pump_candle, calc_atr, is_bullish_structure
 from risk_manager import calculate_leverage, calculate_position_size, calculate_trailing_sl
 from executor import BybitExecutor
 
@@ -267,6 +268,7 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
     log.info("🚀 Scan loop started")
     already_traded = set()  # Symbols traded this session
     already_traded_reset_scan = 0  # Reset counter
+    failed_symbols = {}  # {symbol: scans_remaining} — cooldown after failed order
 
     async with aiohttp.ClientSession() as session:
         # Startup notification
@@ -326,7 +328,10 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                 all_coins = await asyncio.to_thread(scanner.scan_top_volume)
                 WEB.alpha_coins = all_coins
 
-                if slots <= 0:
+                if equity < MIN_EQUITY_FOR_TRADE:
+                    log.warning(f"Equity ${equity:.2f} < min ${MIN_EQUITY_FOR_TRADE}. Skipping trade scan.")
+                    WEB.status = 'LOW_EQUITY'
+                elif slots <= 0:
                     log.info(f"Max positions ({MAX_OPEN_POSITIONS}) reached. Monitoring only.")
                     WEB.status = 'MAX_POSITIONS'
                 else:
@@ -338,6 +343,13 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                             continue
                         if coin['bybit_symbol'] in already_traded:
                             continue
+                        # Skip symbols on cooldown (failed orders)
+                        if coin['bybit_symbol'] in failed_symbols:
+                            failed_symbols[coin['bybit_symbol']] -= 1
+                            if failed_symbols[coin['bybit_symbol']] <= 0:
+                                del failed_symbols[coin['bybit_symbol']]
+                            else:
+                                continue
 
                         ohlcv_data = await asyncio.to_thread(
                             scanner.fetch_multi_timeframe, coin['symbol']
@@ -352,10 +364,20 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                             if df is None or len(df) < 60:
                                 continue
 
-
-
                             signal = analyze(df, coin['symbol'], tf)
                             if signal:
+                                # === HTF BEARISH FILTER (CRITICAL) ===
+                                # Jika sinyal M15, cek apakah H1 dan H4 bearish
+                                # Jangan entry LONG di M15 jika H1 atau H4 masih downtrend
+                                if tf == '15m':
+                                    h1_df = ohlcv_data.get('1h')
+                                    h4_df = ohlcv_data.get('4h')
+                                    h1_bullish = is_bullish_structure(h1_df) if h1_df is not None and len(h1_df) >= 25 else False
+                                    h4_bullish = is_bullish_structure(h4_df) if h4_df is not None and len(h4_df) >= 25 else False
+                                    if not h1_bullish and not h4_bullish:
+                                        log.info(f"🚫 HTF_BEARISH_REJECT M15: {coin['base']} — H1 & H4 not bullish, skip LONG")
+                                        continue
+
                                 # Filter Minimal Confidence 45/100
                                 if signal.get('confidence', 0) < 45:
                                     log.info(f"⚠️ CONFIDENCE_REJECT {tf}: {coin['base']} score={signal['confidence']} < 45")
@@ -441,13 +463,15 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                                 log.info(f"✅ TRADE EXECUTED: #{pos_id} {signal['bybit_symbol']} "
                                          f"@ {fill_price:.6f}")
                             else:
-                                # Order gagal — kirim notif ke Telegram juga
+                                # Order gagal — add to cooldown to prevent spam
                                 err_msg = result.get('error', 'Unknown') if result else 'No result'
                                 log.warning(f"Order failed for {signal['symbol']}: {err_msg}")
+                                failed_symbols[signal['bybit_symbol']] = FAILED_SYMBOL_COOLDOWN
                                 await tg_send(session,
                                     f"⚠️ <b>ORDER FAILED</b>\n"
                                     f"📊 {signal['symbol']} ({signal['timeframe']})\n"
                                     f"❌ {err_msg}\n"
+                                    f"⏳ Cooldown {FAILED_SYMBOL_COOLDOWN} scans\n"
                                     f"💰 Equity: ${WEB.equity:.2f}"
                                 )
 

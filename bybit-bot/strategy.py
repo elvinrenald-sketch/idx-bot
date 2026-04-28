@@ -10,7 +10,8 @@ import pandas as pd
 from typing import Optional, Dict, List, Tuple
 from config import (
     PIVOT_LEFT, PIVOT_RIGHT, MIN_HL_TOUCHES, MAX_HL_TOUCHES, MIN_HL_CANDLE_GAP,
-    MAX_HL_CANDLE_GAP, MAX_HL_PRICE_JUMP_PCT, MAX_RESISTANCE_RETEST,
+    MAX_HL_CANDLE_GAP, MAX_HL_PRICE_JUMP_PCT, MIN_ASCENDING_RANGE_PCT,
+    MAX_RESISTANCE_RETEST,
     ACCUM_MIN_CANDLES, ACCUM_MAX_RANGE_PCT,
     VOLUME_BREAKOUT_MULT,
     SL_BUFFER_PCT, DEFAULT_RR_RATIO,
@@ -400,6 +401,13 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         # Anti-Nukik Logic: Ensure slope is <= 45 degrees (approx 0.5% per candle max)
         if slope_pct_per_candle > 0.5:
             return None  # Terlalu curam / nukik ke atas
+
+        # -- Step 3a-2: MINIMUM ASCENDING RANGE (ANTI-NOISE) --
+        # Total kenaikan HL dari pertama ke terakhir HARUS >= MIN_ASCENDING_RANGE_PCT
+        # Jika HL hanya naik 0.3% (contoh: GALA dari 0.00324 ke 0.00325), itu BUKAN ascending
+        total_hl_range_pct = ((last_hl_price - first_hl_price) / first_hl_price) * 100
+        if total_hl_range_pct < MIN_ASCENDING_RANGE_PCT:
+            return None  # HL naik terlalu sedikit, bukan ascending sejati
 
         # -- Step 3b: FLAT RESISTANCE (Atap Datar) --
         # Ascending Triangle: Pivot High cluster di level yang HAMPIR sama

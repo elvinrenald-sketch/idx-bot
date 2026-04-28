@@ -131,7 +131,7 @@ MAX_ALPHA_COINS       = 30     # Max koin alpha yang di-deep scan
 RATE_LIMIT_DELAY      = 0.15   # Delay antar API call (150ms) untuk hindari rate limit
 
 # Market Cap Filter (CoinGecko)
-MARKETCAP_TOP_N       = 110    # Hanya scan koin dalam top 110 by market cap
+MARKETCAP_TOP_N       = 100    # Hanya exclude top 100 (scan koin rank 101+)
 MARKETCAP_CACHE_SEC   = 3600   # Cache CoinGecko data selama 1 jam
 
 # ══════════════════════════════════════════════════════════════

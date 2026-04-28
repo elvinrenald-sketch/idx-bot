@@ -20,7 +20,7 @@ TG_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
 # ══════════════════════════════════════════════════════════════
 # STRATEGY — Price Action Parameters
 # ══════════════════════════════════════════════════════════════
-TIMEFRAMES          = ['15m', '1h', '4h']        # Scan pada M15, H1, H4
+TIMEFRAMES          = ['1h', '4h']                # Scan pada H1 dan H4 saja (tidak M15)
 PRIMARY_TIMEFRAME   = '1h'                        # Timeframe utama untuk entry
 CANDLE_LOOKBACK     = 150                         # Jumlah candle yang diambil
 

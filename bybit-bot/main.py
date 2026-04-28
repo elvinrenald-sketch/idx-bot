@@ -25,9 +25,8 @@ from config import (
     POSITION_CHECK_SEC, MAX_OPEN_POSITIONS, DATA_DIR, WEB_PORT,
     BYBIT_TESTNET, ACCUM_MAX_RANGE_PCT, VOLUME_BREAKOUT_MULT,
     SL_BUFFER_PCT, DEFAULT_RR_RATIO, TRIPLE_SCREEN_ENABLED,
-    SCAN_INTERVAL_SEC, POSITION_CHECK_SEC, MAX_ALPHA_COINS,
-    MARKETCAP_TOP_N, MARKETCAP_CACHE_SEC,
-    MAX_OPEN_POSITIONS, MIN_EQUITY_FOR_TRADE, FAILED_SYMBOL_COOLDOWN,
+    MAX_ALPHA_COINS, MARKETCAP_TOP_N, MARKETCAP_CACHE_SEC,
+    MIN_EQUITY_FOR_TRADE, FAILED_SYMBOL_COOLDOWN,
     PARTIAL_TP_RATIO, PARTIAL_TP_PCT
 )
 import db
@@ -368,18 +367,6 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
 
                             signal = analyze(df, coin['symbol'], tf)
                             if signal:
-                                # === HTF BEARISH FILTER (CRITICAL) ===
-                                # Jika sinyal M15, cek apakah H1 dan H4 bearish
-                                # Jangan entry LONG di M15 jika H1 atau H4 masih downtrend
-                                if tf == '15m':
-                                    h1_df = ohlcv_data.get('1h')
-                                    h4_df = ohlcv_data.get('4h')
-                                    h1_bullish = is_bullish_structure(h1_df) if h1_df is not None and len(h1_df) >= 25 else False
-                                    h4_bullish = is_bullish_structure(h4_df) if h4_df is not None and len(h4_df) >= 25 else False
-                                    if not h1_bullish and not h4_bullish:
-                                        log.info(f"🚫 HTF_BEARISH_REJECT M15: {coin['base']} — H1 & H4 not bullish, skip LONG")
-                                        continue
-
                                 # Filter Minimal Confidence 45/100
                                 if signal.get('confidence', 0) < 45:
                                     log.info(f"⚠️ CONFIDENCE_REJECT {tf}: {coin['base']} score={signal['confidence']} < 45")

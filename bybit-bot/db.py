@@ -47,7 +47,8 @@ def init_db():
             open_ts         TEXT NOT NULL,
             close_ts        TEXT,
             alpha_pct       REAL,
-            volume_ratio    REAL
+            volume_ratio    REAL,
+            partial_tp_done INTEGER DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS equity_log (
@@ -68,6 +69,15 @@ def init_db():
         );
     """)
     conn.commit()
+    
+    # Auto-migration for existing databases
+    try:
+        conn.execute("ALTER TABLE positions ADD COLUMN partial_tp_done INTEGER DEFAULT 0")
+        conn.commit()
+        log.info("Migration: Added partial_tp_done column to positions table")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     conn.close()
     log.info(f"Database initialized: {DB_PATH}")
 
@@ -172,6 +182,13 @@ def update_sl(pos_id: int, new_sl: float):
     """Update stop loss price for trailing stop."""
     conn = _connect()
     conn.execute("UPDATE positions SET sl_price=? WHERE id=?", (new_sl, pos_id))
+    conn.commit()
+    conn.close()
+
+def mark_partial_tp(pos_id: int):
+    """Mark that partial take profit has been executed for this position."""
+    conn = _connect()
+    conn.execute("UPDATE positions SET partial_tp_done=1 WHERE id=?", (pos_id,))
     conn.commit()
     conn.close()
 

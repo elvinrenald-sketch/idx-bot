@@ -179,12 +179,15 @@ def calculate_trailing_sl(entry_price: float, current_price: float,
 
     profit_in_r = (current_price - entry_price) / r_distance
 
-    if profit_in_r >= 2.0:
-        # At 2R profit, trail SL to entry + 1R
-        new_sl = entry_price + r_distance
-    elif profit_in_r >= 1.0:
-        # At 1R profit, move SL to breakeven
+    if profit_in_r >= 1.2:
+        # At 1.2R profit, trail SL to entry + 0.5R
+        new_sl = entry_price + (r_distance * 0.5)
+    elif profit_in_r >= 0.8:
+        # At 0.8R profit, move SL to breakeven
         new_sl = entry_price + (entry_price * 0.001)  # Tiny buffer above entry
+    elif profit_in_r >= 0.5:
+        # At 0.5R profit, move SL up to reduce risk to 0.3R
+        new_sl = entry_price - (r_distance * 0.3)
     else:
         return None  # Not enough profit to trail
 

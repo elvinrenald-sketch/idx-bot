@@ -25,8 +25,10 @@ from config import (
     POSITION_CHECK_SEC, MAX_OPEN_POSITIONS, DATA_DIR, WEB_PORT,
     BYBIT_TESTNET, ACCUM_MAX_RANGE_PCT, VOLUME_BREAKOUT_MULT,
     SL_BUFFER_PCT, DEFAULT_RR_RATIO, TRIPLE_SCREEN_ENABLED,
-    NEW_LISTING_DAYS, MIN_H4_CANDLES_FOR_STRUCTURE, MIN_D1_CANDLES_FOR_STRUCTURE,
-    MIN_EQUITY_FOR_TRADE, FAILED_SYMBOL_COOLDOWN,
+    SCAN_INTERVAL_SEC, POSITION_CHECK_SEC, MAX_ALPHA_COINS,
+    MARKETCAP_TOP_N, MARKETCAP_CACHE_SEC,
+    MAX_OPEN_POSITIONS, MIN_EQUITY_FOR_TRADE, FAILED_SYMBOL_COOLDOWN,
+    PARTIAL_TP_RATIO, PARTIAL_TP_PCT
 )
 import db
 from scanner import MarketScanner
@@ -573,9 +575,32 @@ async def monitor_loop(executor: BybitExecutor):
                                 await tg_close(session, closed, reason)
                             continue
 
-                        # Position still open — check for trailing stop
+                        # Position still open — check for trailing stop and partial TP
                         current_price = live['mark_price']
                         if current_price > 0 and pos['entry_price'] > 0:
+                            # 1. Partial TP Check
+                            r_distance = pos['entry_price'] - pos['sl_price']
+                            if r_distance > 0 and pos.get('partial_tp_done', 0) == 0:
+                                profit_in_r = (current_price - pos['entry_price']) / r_distance
+                                if profit_in_r >= PARTIAL_TP_RATIO:
+                                    # Execute Partial TP (close 50%)
+                                    close_qty = pos['qty'] * (PARTIAL_TP_PCT / 100.0)
+                                    # Round qty appropriately (can't use full precision on Bybit sometimes, but executor will handle or we just send it)
+                                    log.info(f"💰 PARTIAL TP TRIGGERED for {pos['bybit_symbol']} at +{profit_in_r:.2f}R")
+                                    success = await asyncio.to_thread(
+                                        executor.close_position,
+                                        pos['bybit_symbol'],
+                                        close_qty
+                                    )
+                                    if success:
+                                        db.mark_partial_tp(pos['id'])
+                                        await tg_send(session,
+                                            f"💰 <b>PARTIAL TP ({PARTIAL_TP_PCT}%)</b>\n"
+                                            f"📈 {pos['bybit_symbol']} (+{profit_in_r:.1f}R)\n"
+                                            f"Locked profit at {current_price:.6f}"
+                                        )
+
+                            # 2. Trailing Stop Check
                             new_sl = calculate_trailing_sl(
                                 entry_price=pos['entry_price'],
                                 current_price=current_price,

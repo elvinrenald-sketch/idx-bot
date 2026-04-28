@@ -53,10 +53,10 @@ def calc_volume_sma(df: pd.DataFrame, period: int = 20) -> pd.Series:
 def detect_pivot_lows(df: pd.DataFrame, left: int = PIVOT_LEFT,
                       right: int = PIVOT_RIGHT) -> List[int]:
     """
-    Detect pivot low points based on fractal body analysis.
-    A pivot low at index i means: body_low[i] <= all body_lows in window [i-left : i+right].
+    Detect pivot low points based on true price lows (wicks).
+    A pivot low at index i means: low[i] <= all lows in window [i-left : i+right].
     """
-    lows = df[['open', 'close']].min(axis=1).values
+    lows = df['low'].values
     n = len(lows)
     pivots = []
 
@@ -80,8 +80,8 @@ def detect_pivot_lows(df: pd.DataFrame, left: int = PIVOT_LEFT,
 
 def detect_pivot_highs(df: pd.DataFrame, left: int = PIVOT_LEFT,
                        right: int = PIVOT_RIGHT) -> List[int]:
-    """Detect pivot high points based on fractal body analysis."""
-    highs = df[['open', 'close']].max(axis=1).values
+    """Detect pivot high points based on true price highs (wicks)."""
+    highs = df['high'].values
     n = len(highs)
     pivots = []
 
@@ -158,7 +158,7 @@ def detect_higher_lows(df: pd.DataFrame, pivot_indices: List[int],
                        min_touches: int = MIN_HL_TOUCHES,
                        max_touches: int = MAX_HL_TOUCHES) -> Tuple[bool, List[int]]:
     """
-    Check if pivot lows form a series of higher lows (using fractal body prices).
+    Check if pivot lows form a series of higher lows (using true wick prices).
     Returns (is_valid, list_of_hl_indices).
     Need at least `min_touches` consecutive higher lows.
     
@@ -170,7 +170,7 @@ def detect_higher_lows(df: pd.DataFrame, pivot_indices: List[int],
     if len(pivot_indices) < 2:
         return False, []
 
-    body_lows = df[['open', 'close']].min(axis=1).values
+    wick_lows = df['low'].values
 
     # Find longest consecutive higher-low sequence ending near the latest candles
     best_seq = []
@@ -195,11 +195,11 @@ def detect_higher_lows(df: pd.DataFrame, pivot_indices: List[int],
             current_seq = [curr_idx]
             continue
 
-        if body_lows[curr_idx] > body_lows[seq_last_idx]:
+        if wick_lows[curr_idx] > wick_lows[seq_last_idx]:
             # [GUARD 3] Loncatan harga antar HL tidak boleh terlalu besar
             # Jika HL lompat > MAX_HL_PRICE_JUMP_PCT, itu bukan ascending yang gradual
-            prev_price = body_lows[seq_last_idx]
-            curr_price = body_lows[curr_idx]
+            prev_price = wick_lows[seq_last_idx]
+            curr_price = wick_lows[curr_idx]
             if prev_price > 0:
                 price_jump_pct = ((curr_price - prev_price) / prev_price) * 100
                 if price_jump_pct > MAX_HL_PRICE_JUMP_PCT:
@@ -411,8 +411,8 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
 
         # -- Step 3b: FLAT RESISTANCE (Atap Datar) --
         # Ascending Triangle: Pivot High cluster di level yang HAMPIR sama
-        # Di real market, resistance tidak 100% flat — toleransi 2%
-        FLAT_RESISTANCE_TOLERANCE = 2.0  # max 2% perbedaan antar Pivot High
+        # Di real market, resistance tidak 100% flat — toleransi 1.5% (lebih ketat karena pakai wick)
+        FLAT_RESISTANCE_TOLERANCE = 1.5  # max 1.5% perbedaan antar Pivot High
         flat_resistance_valid = False
         flat_resistance_level = None
 
@@ -420,8 +420,8 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             # Ambil pivot high yang relevan: hanya yang berada dalam rentang HL pertama hingga sekarang
             relevant_highs = [i for i in p_highs if i >= first_hl_idx]
             if len(relevant_highs) >= 2:
-                # Ambil harga-harga pivot high terbaru
-                ph_prices = [max(df['open'].iloc[i], df['close'].iloc[i]) for i in relevant_highs[-5:]]
+                # Ambil harga-harga pivot high terbaru (menggunakan sumbu/wick high)
+                ph_prices = [df['high'].iloc[i] for i in relevant_highs[-5:]]
                 ph_max = max(ph_prices)
                 ph_min = min(ph_prices)
                 last_ph = ph_prices[-1]
@@ -469,10 +469,10 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         resistance_tolerance = flat_resistance_level * 0.015  # 1.5% tolerance
 
         for k in range(first_hl_idx, len(df)):
-            candle_body_high = max(df['open'].iloc[k], df['close'].iloc[k])
+            candle_wick_high = df['high'].iloc[k]
             candle_close = df['close'].iloc[k]
-            # Harga menyentuh zona resistance (dari bawah) berdasarkan body
-            if candle_body_high >= flat_resistance_level - resistance_tolerance:
+            # Harga menyentuh zona resistance (dari bawah) berdasarkan wick high
+            if candle_wick_high >= flat_resistance_level - resistance_tolerance:
                 if candle_close <= flat_resistance_level * 1.01:  # Belum breakout
                     resistance_retest_count += 1
 
@@ -481,8 +481,8 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         retest_events = 0
         in_zone = False
         for k in range(first_hl_idx, len(df)):
-            candle_body_high = max(df['open'].iloc[k], df['close'].iloc[k])
-            near_resistance = candle_body_high >= flat_resistance_level - resistance_tolerance
+            candle_wick_high = df['high'].iloc[k]
+            near_resistance = candle_wick_high >= flat_resistance_level - resistance_tolerance
             if near_resistance and not in_zone:
                 retest_events += 1
                 in_zone = True

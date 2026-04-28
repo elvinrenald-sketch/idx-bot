@@ -91,8 +91,10 @@ MIN_EQUITY_FOR_TRADE = 5.5   # [NEW] Minimum equity $5.5 USDT untuk boleh trade.
 FAILED_SYMBOL_COOLDOWN = 10  # [NEW] Cooldown: skip simbol yang gagal selama 10 scan (~10 menit)
 MIN_LEVERAGE       = 3       # Leverage minimum
 MAX_LEVERAGE       = 10      # Leverage maksimum
-DEFAULT_RR_RATIO   = 2.0     # Risk:Reward = 1:2 (TP = 2x jarak SL)
-TRAILING_BREAKEVEN = True    # Geser SL ke breakeven setelah profit >= 1R
+DEFAULT_RR_RATIO   = 1.3     # Risk:Reward = 1:1.3 (TP realistis untuk M15 crypto)
+PARTIAL_TP_RATIO   = 0.8     # Close 50% posisi di profit 0.8R
+PARTIAL_TP_PCT     = 50      # Persentase size yang diclose saat partial TP
+TRAILING_BREAKEVEN = True    # Geser SL otomatis
 
 # SL Buffer
 SL_BUFFER_PCT      = 0.3     # Tambahan 0.3% di bawah support zone untuk SL

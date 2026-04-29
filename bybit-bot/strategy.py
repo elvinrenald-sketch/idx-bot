@@ -507,17 +507,18 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         # -- Step 5: Trendline value --
         trendline_price = _calc_trendline_value(df, hl_indices)
 
-        # -- Step 6: ENTRY CONDITION — TRENDLINE SUPPORT TOUCH ONLY --
+        # -- Step 6: ENTRY CONDITION — VALID HIGHER LOW BOUNCE --
         # ════════════════════════════════════════════════════════════
-        # Ascending Triangle ENTRY = pullback ke ascending trendline bawah.
-        # BUKAN entry dekat resistance. Kita beli di SUPPORT, bukan di ATAP.
-        #
-        # Syarat:
-        #   1. Trendline harus valid (ada proyeksi)
-        #   2. Harga saat ini DEKAT trendline (±1.5%) 
-        #   3. Harga HARUS di bagian BAWAH triangle (bottom 40% range)
-        #   4. Resistance sudah di-retest minimal 2x (konfirmasi atap datar kuat)
-        #   5. Harga harus sedang PULLBACK (turun menuju support), bukan rally naik
+        # HL entry yang VALID punya 3 tahap:
+        #   A. PULLBACK: Harga BARU TURUN dari atas trendline ke trendline
+        #      → Minimal 2 dari 5 candle sebelumnya bearish (ada pullback nyata)
+        #      → Harga pernah di ATAS trendline baru-baru ini (bukan sideways di bawah)
+        #   B. TOUCH: Harga saat ini DEKAT trendline (low candle menyentuh zona)
+        #      → Current price dalam ±1.5% dari trendline
+        #      → Harga di bagian BAWAH triangle (bottom 40%)
+        #   C. BOUNCE: Candle saat ini menunjukkan REJECTION di trendline
+        #      → Bullish candle (close > open) ATAU lower wick panjang (>40% range)
+        #      → Ini konfirmasi bahwa buyer masuk di support
         # ════════════════════════════════════════════════════════════
 
         if not trendline_price or trendline_price <= 0:
@@ -526,33 +527,74 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         if len(hl_indices) < MIN_HL_TOUCHES or len(hl_indices) > MAX_HL_TOUCHES:
             return None  # HL count di luar range
 
-        # ═══ HARD CHECK: POSISI HARGA DALAM TRIANGLE ═══
-        # Hitung range dari trendline (support) ke resistance (atap)
+        # ═══ TAHAP A: PULLBACK CONFIRMED ═══
+        # Harga HARUS pernah di atas trendline baru-baru ini (bukti ada pullback)
+        # Cek 5 candle sebelum candle saat ini
+        if len(df) >= 7:
+            lookback_candles = df.iloc[-7:-1]  # 5-6 candle sebelum current
+            max_recent_high = lookback_candles['high'].max()
+            pullback_origin_pct = ((max_recent_high - trendline_price) / trendline_price) * 100
+            
+            # Harga harus pernah minimal 1.0% DI ATAS trendline dalam 6 candle terakhir
+            # Ini membuktikan ada "turun dari atas" = pullback nyata
+            if pullback_origin_pct < 1.0:
+                return None  # Harga tidak pernah di atas trendline — bukan pullback, cuma sideways
+
+            # Minimal 2 dari 5 candle sebelumnya harus bearish (bukti penurunan)
+            bearish_count = 0
+            for _, c in lookback_candles.iterrows():
+                if c['close'] < c['open']:
+                    bearish_count += 1
+            if bearish_count < 2:
+                return None  # Tidak ada candle bearish = tidak ada pullback nyata
+
+        # ═══ TAHAP B: TOUCH — Harga di zona trendline support ═══
+        # Hitung posisi harga dalam triangle
         triangle_range = flat_resistance_level - trendline_price
         if triangle_range <= 0:
             return None  # Trendline di atas resistance = invalid
 
-        # Posisi harga dalam triangle: 0% = tepat di trendline, 100% = tepat di resistance
+        # Posisi harga: 0% = tepat di trendline, 100% = tepat di resistance
         price_position_pct = ((current_price - trendline_price) / triangle_range) * 100
 
-        # REJECT jika harga di atas 40% dari triangle range (terlalu dekat resistance)
-        # Entry hanya boleh di BOTTOM 40% — di zona support/trendline
+        # Entry hanya di BOTTOM 40% triangle
         if price_position_pct > 40.0:
-            return None  # ❌ TOLAK: Harga terlalu dekat resistance, bukan di support
+            return None  # ❌ Terlalu dekat resistance
 
-        # REJECT jika harga di bawah trendline terlalu jauh (sudah jebol support)
+        # Jangan entry kalau sudah jebol support jauh
         if price_position_pct < -15.0:
-            return None  # ❌ TOLAK: Harga sudah jauh di bawah trendline
+            return None  # ❌ Sudah jauh di bawah trendline
 
         # Harga harus DEKAT trendline support (±1.5%)
         trendline_distance_pct = ((current_price - trendline_price) / trendline_price) * 100
         if trendline_distance_pct < -1.5 or trendline_distance_pct > 1.5:
-            return None  # Terlalu jauh dari trendline — bukan pullback ke support
+            return None  # Terlalu jauh dari trendline
 
-        # JARAK ke resistance harus JAUH (minimal 2% di bawah resistance)
+        # Jarak ke resistance harus JAUH (minimal 2% di bawah resistance)
         resistance_distance_pct = ((flat_resistance_level - current_price) / flat_resistance_level) * 100
         if resistance_distance_pct < 2.0:
-            return None  # ❌ TOLAK: Harga terlalu dekat resistance — ini entry di ATAP
+            return None  # ❌ Terlalu dekat resistance
+
+        # ═══ TAHAP C: BOUNCE — Candle saat ini menunjukkan rejection di trendline ═══
+        # Di HL yang valid, candle entry itu BULLISH (buyer masuk di support)
+        # ATAU punya lower wick panjang (buyer reject harga lebih rendah)
+        if len(df) >= 2:
+            entry_candle = df.iloc[-1]
+            candle_body = entry_candle['close'] - entry_candle['open']
+            candle_range = entry_candle['high'] - entry_candle['low']
+            lower_wick = min(entry_candle['open'], entry_candle['close']) - entry_candle['low']
+
+            is_bullish = candle_body > 0  # Close > Open = bullish
+            has_wick_rejection = candle_range > 0 and (lower_wick / candle_range) > 0.4  # Long lower wick
+
+            if not is_bullish and not has_wick_rejection:
+                return None  # ❌ Tidak ada sinyal bounce di trendline — belum waktunya entry
+
+            # Extra: LOW candle harus DEKAT trendline (menyentuh zona support)
+            candle_low = entry_candle['low']
+            low_to_trendline_pct = ((candle_low - trendline_price) / trendline_price) * 100
+            if low_to_trendline_pct > 2.0 or low_to_trendline_pct < -2.0:
+                return None  # Low candle tidak menyentuh zona trendline
 
         # Konfirmasi: resistance sudah di-retest minimal 2x (atap datar terbukti)
         if retest_events < 2:
@@ -560,37 +602,6 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
 
         if retest_events > MAX_RESISTANCE_RETEST:
             return None  # Terlalu banyak retest, pola sudah lemah
-            
-        # -- Step 6.5: VOLUME CONFIRMATION --
-        # Pullback entry = volume should NOT be dead, but doesn't need to spike
-        # Accept if volume >= 0.7x avg (not dead) OR volume is rising (bounce starting)
-        vol_sma = calc_volume_sma(df, 20)
-        vol_ratio_1 = df['volume'].iloc[-1] / vol_sma.iloc[-1] if vol_sma.iloc[-1] > 0 else 1.0
-        vol_ratio_2 = df['volume'].iloc[-2] / vol_sma.iloc[-2] if vol_sma.iloc[-2] > 0 else 1.0
-        max_vol_ratio = max(vol_ratio_1, vol_ratio_2)
-        vol_rising = vol_ratio_1 > vol_ratio_2  # Volume increasing = bounce confirmation
-        
-        if max_vol_ratio < 0.7 and not vol_rising:
-            return None  # Volume completely dead — no interest at this level
-
-        # -- Step 7: MAX RISE FILTER --
-        recent_high = df['high'].iloc[-30:].max()
-        total_rise = ((recent_high - first_hl_price) / first_hl_price) * 100
-        if total_rise > 25.0:
-            return None  # Sudah pump terlalu tinggi
-
-        # -- Step 8: PULLBACK DIRECTION --
-        # Entry WAJIB saat harga sedang PULLBACK ke trendline, bukan rally naik.
-        # Minimal 1 dari 2 candle terakhir harus BEARISH (close < open) = harga turun.
-        if len(df) >= 3:
-            candle_last = df.iloc[-1]  # Candle saat ini
-            candle_prev = df.iloc[-2]  # Candle sebelumnya
-            last_bearish = candle_last['close'] < candle_last['open']
-            prev_bearish = candle_prev['close'] < candle_prev['open']
-            
-            if not last_bearish and not prev_bearish:
-                # 2 candle terakhir BULLISH semua = rally naik, BUKAN pullback
-                return None  # ❌ TOLAK: Harga sedang rally naik, bukan pullback ke support
 
         # -- Step 9: No pump candles --
         if is_pump_candle(df, atr):
@@ -599,6 +610,12 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         # == SIGNAL ==
         entry_price = current_price
         current_atr = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else entry_price * 0.02
+
+        # Max rise filter — reject kalau sudah pump terlalu tinggi
+        recent_high = df['high'].iloc[-30:].max()
+        total_rise = ((recent_high - first_hl_price) / first_hl_price) * 100
+        if total_rise > 25.0:
+            return None  # Sudah pump terlalu tinggi
 
         atr_mult = ATR_SL_MULT.get(timeframe, ATR_SL_MULT_DEFAULT)
         atr_sl_distance = current_atr * atr_mult

@@ -423,7 +423,7 @@ def diagnose_analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
         return f"Step3a: HL range too small ({total_hl_range_pct:.2f}%)"
 
     # Flat resistance
-    FLAT_TOL = 2.0
+    FLAT_TOL = 4.0
     flat_resistance_level = None
     if len(p_highs) >= 2:
         relevant_highs = [i for i in p_highs if i >= first_hl_idx]
@@ -432,7 +432,7 @@ def diagnose_analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
             ph_max, ph_min = max(ph_prices), min(ph_prices)
             spread_pct = ((ph_max - ph_min) / ph_max) * 100
             dist_last = ((ph_max - ph_prices[-1]) / ph_max) * 100
-            if spread_pct <= FLAT_TOL and dist_last <= 2.0:
+            if spread_pct <= FLAT_TOL and dist_last <= 4.0:
                 flat_resistance_level = (ph_max + ph_min) / 2
             else:
                 return f"Step3b: Resis NOT flat (spread={spread_pct:.2f}% tol={FLAT_TOL}%)"
@@ -595,8 +595,8 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
 
         # -- Step 3b: FLAT RESISTANCE (Atap Datar) --
         # Ascending Triangle: Pivot High cluster di level yang HAMPIR sama
-        # Di real market, resistance tidak 100% flat — toleransi 2.0% untuk ascending triangle sejati
-        FLAT_RESISTANCE_TOLERANCE = 2.0  # max 2.0% perbedaan antar Pivot High (3% terlalu lebar)
+        # Di real market, resistance tidak 100% flat — toleransi 4.0% untuk ascending triangle sejati
+        FLAT_RESISTANCE_TOLERANCE = 4.0  # max 4.0% perbedaan antar Pivot High (di altcoin wajar)
         flat_resistance_valid = False
         flat_resistance_level = None
 
@@ -610,13 +610,13 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
                 ph_min = min(ph_prices)
                 last_ph = ph_prices[-1]
                 
-                # Cek apakah semua Pivot High berkumpul dalam toleransi 2%
+                # Cek apakah semua Pivot High berkumpul dalam toleransi
                 spread_pct = ((ph_max - ph_min) / ph_max) * 100
                 
                 # Pucuk terakhir HARUS mengetes resistance (tidak boleh membentuk lower high yang jauh)
                 distance_last_to_max = ((ph_max - last_ph) / ph_max) * 100
                 
-                if spread_pct <= FLAT_RESISTANCE_TOLERANCE and distance_last_to_max <= 2.0 and len(ph_prices) >= 2:
+                if spread_pct <= FLAT_RESISTANCE_TOLERANCE and distance_last_to_max <= 4.0 and len(ph_prices) >= 2:
                     flat_resistance_valid = True
                     flat_resistance_level = (ph_max + ph_min) / 2
 

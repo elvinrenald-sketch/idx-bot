@@ -415,7 +415,7 @@ def diagnose_analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
     if candle_span <= 0:
         return f"Step3: candle_span=0"
     slope_pct = ((last_hl_price - first_hl_price) / candle_span / first_hl_price) * 100
-    if slope_pct > 0.5:
+    if slope_pct > 1.0:
         return f"Step3: Slope too steep ({slope_pct:.3f}%/candle)"
 
     total_hl_range_pct = ((last_hl_price - first_hl_price) / first_hl_price) * 100
@@ -581,8 +581,9 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         slope_per_candle = (last_hl_price - first_hl_price) / candle_span
         slope_pct_per_candle = (slope_per_candle / first_hl_price) * 100
 
-        # Anti-Nukik Logic: Ensure slope is <= 45 degrees (approx 0.5% per candle max)
-        if slope_pct_per_candle > 0.5:
+        # Anti-Nukik Logic: Ensure slope is <= ~60 degrees (1.0% per candle max)
+        # 0.5% was too strict — BSB(0.75%), APE(0.57%), BIO(0.69%) all valid ascending triangles
+        if slope_pct_per_candle > 1.0:
             return None  # Terlalu curam / nukik ke atas
 
         # -- Step 3a-2: MINIMUM ASCENDING RANGE (ANTI-NOISE) --

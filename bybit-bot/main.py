@@ -733,15 +733,15 @@ async def api_diagnose():
         results = []
         failure_counts = {}
 
+        import ccxt
+        ex = ccxt.bybit({
+            'apiKey': BYBIT_API_KEY, 'secret': BYBIT_API_SECRET,
+            'options': {'defaultType': 'swap'},
+        })
+
         for coin in coins:
             for tf in TIMEFRAMES:
                 try:
-                    # Fetch fresh OHLCV data
-                    import ccxt
-                    ex = ccxt.bybit({
-                        'apiKey': BYBIT_API_KEY, 'secret': BYBIT_API_SECRET,
-                        'options': {'defaultType': 'swap'},
-                    })
                     ohlcv = ex.fetch_ohlcv(coin['symbol'], tf, limit=150)
                     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 
@@ -758,7 +758,6 @@ async def api_diagnose():
                         step = reason.split(':')[0]
                         failure_counts[step] = failure_counts.get(step, 0) + 1
 
-                    ex.close()
                 except Exception as e:
                     results.append({
                         'coin': coin.get('base', '?'),

@@ -514,9 +514,10 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         #
         # Syarat:
         #   1. Trendline harus valid (ada proyeksi)
-        #   2. Harga saat ini DEKAT trendline (±1.0%)
-        #   3. Resistance sudah di-retest minimal 2x (konfirmasi atap datar kuat)
-        #   4. Harga harus sedang PULLBACK (turun menuju support), bukan rally naik
+        #   2. Harga saat ini DEKAT trendline (±1.5%) 
+        #   3. Harga HARUS di bagian BAWAH triangle (bottom 40% range)
+        #   4. Resistance sudah di-retest minimal 2x (konfirmasi atap datar kuat)
+        #   5. Harga harus sedang PULLBACK (turun menuju support), bukan rally naik
         # ════════════════════════════════════════════════════════════
 
         if not trendline_price or trendline_price <= 0:
@@ -525,10 +526,33 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         if len(hl_indices) < MIN_HL_TOUCHES or len(hl_indices) > MAX_HL_TOUCHES:
             return None  # HL count di luar range
 
-        # Harga harus DEKAT trendline support (±1.0%)
+        # ═══ HARD CHECK: POSISI HARGA DALAM TRIANGLE ═══
+        # Hitung range dari trendline (support) ke resistance (atap)
+        triangle_range = flat_resistance_level - trendline_price
+        if triangle_range <= 0:
+            return None  # Trendline di atas resistance = invalid
+
+        # Posisi harga dalam triangle: 0% = tepat di trendline, 100% = tepat di resistance
+        price_position_pct = ((current_price - trendline_price) / triangle_range) * 100
+
+        # REJECT jika harga di atas 40% dari triangle range (terlalu dekat resistance)
+        # Entry hanya boleh di BOTTOM 40% — di zona support/trendline
+        if price_position_pct > 40.0:
+            return None  # ❌ TOLAK: Harga terlalu dekat resistance, bukan di support
+
+        # REJECT jika harga di bawah trendline terlalu jauh (sudah jebol support)
+        if price_position_pct < -15.0:
+            return None  # ❌ TOLAK: Harga sudah jauh di bawah trendline
+
+        # Harga harus DEKAT trendline support (±1.5%)
         trendline_distance_pct = ((current_price - trendline_price) / trendline_price) * 100
-        if trendline_distance_pct < -2.0 or trendline_distance_pct > 2.0:
+        if trendline_distance_pct < -1.5 or trendline_distance_pct > 1.5:
             return None  # Terlalu jauh dari trendline — bukan pullback ke support
+
+        # JARAK ke resistance harus JAUH (minimal 2% di bawah resistance)
+        resistance_distance_pct = ((flat_resistance_level - current_price) / flat_resistance_level) * 100
+        if resistance_distance_pct < 2.0:
+            return None  # ❌ TOLAK: Harga terlalu dekat resistance — ini entry di ATAP
 
         # Konfirmasi: resistance sudah di-retest minimal 2x (atap datar terbukti)
         if retest_events < 2:

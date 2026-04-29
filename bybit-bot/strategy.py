@@ -185,6 +185,10 @@ def detect_higher_lows(df: pd.DataFrame, pivot_indices: List[int],
         # [GUARD 1] Jarak MINIMUM antar HL harus >= MIN_HL_CANDLE_GAP candle
         candle_gap = curr_idx - seq_last_idx
         if candle_gap < MIN_HL_CANDLE_GAP:
+            # Pivot terlalu dekat (doji/duplicate) — jika lebih tinggi, UPDATE last element
+            # Ini menangani kasus di mana candle doji membuat 2 pivot di level yang sama
+            if body_lows[curr_idx] > body_lows[seq_last_idx]:
+                current_seq[-1] = curr_idx  # Replace with higher pivot
             continue
 
         # [GUARD 2] Jarak MAXIMUM antar HL harus <= MAX_HL_CANDLE_GAP candle

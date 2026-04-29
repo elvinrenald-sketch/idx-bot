@@ -412,8 +412,8 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
 
         # -- Step 3b: FLAT RESISTANCE (Atap Datar) --
         # Ascending Triangle: Pivot High cluster di level yang HAMPIR sama
-        # Di real market, resistance tidak 100% flat — toleransi 3.0% untuk crypto wick
-        FLAT_RESISTANCE_TOLERANCE = 3.0  # max 3.0% perbedaan antar Pivot High
+        # Di real market, resistance tidak 100% flat — toleransi 2.0% untuk ascending triangle sejati
+        FLAT_RESISTANCE_TOLERANCE = 2.0  # max 2.0% perbedaan antar Pivot High (3% terlalu lebar)
         flat_resistance_valid = False
         flat_resistance_level = None
 
@@ -580,16 +580,17 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             return None  # Sudah pump terlalu tinggi
 
         # -- Step 8: PULLBACK DIRECTION --
-        # Harga harus sedang turun menuju trendline, BUKAN sedang rally naik
-        if len(df) >= 4:
-            c0 = current_price
-            c1 = df['close'].iloc[-2]
-            c2 = df['close'].iloc[-3]
-            c3 = df['close'].iloc[-4]
-            if c0 > c1 > c2 > c3:
-                # 4 candle naik berturut — cek apakah sudah jauh dari trendline
-                if trendline_price and ((c0 - trendline_price) / trendline_price * 100) > 0.8:
-                    return None  # Rally naik menjauhi support, bukan pullback
+        # Entry WAJIB saat harga sedang PULLBACK ke trendline, bukan rally naik.
+        # Minimal 1 dari 2 candle terakhir harus BEARISH (close < open) = harga turun.
+        if len(df) >= 3:
+            candle_last = df.iloc[-1]  # Candle saat ini
+            candle_prev = df.iloc[-2]  # Candle sebelumnya
+            last_bearish = candle_last['close'] < candle_last['open']
+            prev_bearish = candle_prev['close'] < candle_prev['open']
+            
+            if not last_bearish and not prev_bearish:
+                # 2 candle terakhir BULLISH semua = rally naik, BUKAN pullback
+                return None  # ❌ TOLAK: Harga sedang rally naik, bukan pullback ke support
 
         # -- Step 9: No pump candles --
         if is_pump_candle(df, atr):
@@ -602,9 +603,10 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         atr_mult = ATR_SL_MULT.get(timeframe, ATR_SL_MULT_DEFAULT)
         atr_sl_distance = current_atr * atr_mult
 
-        # SL: di bawah trendline support (satu-satunya entry point sekarang)
+        # SL: di bawah trendline support — ambil yang LEBIH KETAT (dekat ke entry)
+        # max() = pilih SL yang lebih TINGGI = lebih DEKAT = loss lebih kecil
         trendline_sl = trendline_price * (1 - SL_BUFFER_PCT / 100)
-        sl_price = min(trendline_sl, entry_price - atr_sl_distance)
+        sl_price = max(trendline_sl, entry_price - atr_sl_distance)
 
         min_sl_pct = atr_mult / 100.0
         min_sl_floor = entry_price * min_sl_pct
@@ -612,7 +614,10 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             sl_price = entry_price - min_sl_floor
 
         sl_distance = entry_price - sl_price
-        tp_price = entry_price + (sl_distance * DEFAULT_RR_RATIO)
+        rr_tp = entry_price + (sl_distance * DEFAULT_RR_RATIO)
+        # TP = minimum dari RR-based TP dan resistance level
+        # Ascending triangle: target natural adalah resistance, bukan breakout harapan
+        tp_price = min(rr_tp, flat_resistance_level * 0.998)  # 0.2% di bawah resistance
 
         sl_pct = ((entry_price - sl_price) / entry_price) * 100
         tp_pct = ((tp_price - entry_price) / entry_price) * 100
@@ -955,9 +960,9 @@ def _calc_trendline_value(df: pd.DataFrame, hl_indices: List[int]) -> Optional[f
     current_idx = len(df) - 1
     candles_since_last_hl = current_idx - idx2
 
-    # Batasi proyeksi maks 30 candle dari HL terakhir
-    # Harus cukup panjang untuk menangkap pullback yang valid
-    if candles_since_last_hl > 30:
+    # Batasi proyeksi maks 15 candle dari HL terakhir
+    # H4: ~2.5 hari, H1: ~15 jam — cukup untuk pullback, tidak over-extrapolate
+    if candles_since_last_hl > 15:
         return None
 
     trendline_at_now = price2 + slope * candles_since_last_hl

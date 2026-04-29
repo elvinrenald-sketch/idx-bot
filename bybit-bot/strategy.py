@@ -368,13 +368,44 @@ def diagnose_analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
     has_hl, hl_indices = detect_higher_lows(df, p_lows)
     if not has_hl or len(hl_indices) < 2:
         body_lows = df[['open', 'close']].min(axis=1).values
-        pivot_prices = [round(body_lows[i], 6) for i in p_lows[-6:]]
-        pivot_idxs = p_lows[-6:]
-        gaps = [pivot_idxs[j] - pivot_idxs[j-1] for j in range(1, len(pivot_idxs))]
-        asc = [body_lows[pivot_idxs[j]] > body_lows[pivot_idxs[j-1]] for j in range(1, len(pivot_idxs))]
-        last_dist = len(df) - 1 - p_lows[-1] if p_lows else 99
-        return (f"Step2: No HL (pivots={len(p_lows)}, seq={len(hl_indices) if hl_indices else 0}, "
-                f"last_dist={last_dist}, prices={pivot_prices}, gaps={gaps}, asc={asc})")
+        trace = []
+        cur = [p_lows[0]]
+        best = []
+        for i in range(1, len(p_lows)):
+            ci = p_lows[i]
+            si = cur[-1]
+            gap = ci - si
+            cp = round(float(body_lows[ci]), 6)
+            sp = round(float(body_lows[si]), 6)
+            if gap < MIN_HL_CANDLE_GAP:
+                act = "UPD" if body_lows[ci] > body_lows[si] else "SKIP"
+                if body_lows[ci] > body_lows[si]:
+                    cur[-1] = ci
+                trace.append(f"{act}g{gap}")
+                continue
+            if gap > MAX_HL_CANDLE_GAP:
+                if len(cur) > len(best): best = cur[:]
+                cur = [ci]
+                trace.append(f"RST_g{gap}")
+                continue
+            if body_lows[ci] > body_lows[si]:
+                jmp = ((body_lows[ci]-body_lows[si])/body_lows[si])*100 if body_lows[si]>0 else 0
+                if jmp > MAX_HL_PRICE_JUMP_PCT:
+                    if len(cur)>len(best): best=cur[:]
+                    cur=[ci]
+                    trace.append(f"JMP{jmp:.1f}")
+                    continue
+                cur.append(ci)
+                trace.append(f"+s{len(cur)}")
+            else:
+                if len(cur)>len(best): best=cur[:]
+                cur=[ci]
+                trace.append(f"BRK({cp}<={sp})")
+        if len(cur)>len(best): best=cur[:]
+        last_dist = len(df)-1-p_lows[-1] if p_lows else 99
+        b_end = (len(df)-1-best[-1]) if best else 99
+        return (f"Step2: best={len(best)} end_dist={b_end} last_dist={last_dist} "
+                f"trace=[{','.join(trace[-15:])}]")
 
     first_hl_idx = hl_indices[0]
     last_hl_idx = hl_indices[-1]

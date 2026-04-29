@@ -575,7 +575,7 @@ async def monitor_loop(executor: BybitExecutor):
                                     # Round qty appropriately (can't use full precision on Bybit sometimes, but executor will handle or we just send it)
                                     log.info(f"💰 PARTIAL TP TRIGGERED for {pos['bybit_symbol']} at +{profit_in_r:.2f}R")
                                     success = await asyncio.to_thread(
-                                        executor.close_position,
+                                        executor.close_long,
                                         pos['bybit_symbol'],
                                         close_qty
                                     )

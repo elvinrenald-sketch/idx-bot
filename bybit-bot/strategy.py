@@ -223,9 +223,10 @@ def detect_higher_lows(df: pd.DataFrame, pivot_indices: List[int],
     if len(current_seq) > len(best_seq):
         best_seq = current_seq[:]
 
-    # We need the HL sequence to be recent (last HL within last 30 candles)
+    # We need the HL sequence to be recent (last HL within last 50 candles)
     # AND within the allowed touch range (2-5)
-    if best_seq and best_seq[-1] >= len(df) - 30 and min_touches <= len(best_seq) <= max_touches:
+    # 50 candles: H1=50jam(2hari), H4=200jam(8hari) — cukup untuk swing trading
+    if best_seq and best_seq[-1] >= len(df) - 50 and min_touches <= len(best_seq) <= max_touches:
         return True, best_seq
 
 

@@ -34,7 +34,7 @@ MIN_HL_TOUCHES    = 2   # Minimal 2 higher low touches pada trendline
 MAX_HL_TOUCHES    = 4   # Maksimal 4 touches (lebih dari ini = stale pattern)
 MIN_HL_CANDLE_GAP = 3   # [Tuned] Jarak minimal antar HL agar bisa menangkap tren agresif
 MAX_HL_CANDLE_GAP = 40  # [NEW] Jarak MAKSIMAL antar HL berurutan (candle). >40 = HL terlalu jauh, bukan tren kohesif
-MAX_HL_PRICE_JUMP_PCT = 3.5  # [NEW] Loncatan harga MAX antar HL berurutan (%). >3.5% = bukan ascending gradual
+MAX_HL_PRICE_JUMP_PCT = 10.0  # [FIX] Crypto volatile, 3.5% terlalu ketat. 10% masih ascending gradual untuk altcoin
 MIN_ASCENDING_RANGE_PCT = 1.0  # [NEW] Minimum jarak total HL pertama ke terakhir (%). <1% = bukan ascending, cuma noise
 MAX_RESISTANCE_RETEST = 4  # Maksimal 4x retest resistance untuk boleh entry
 

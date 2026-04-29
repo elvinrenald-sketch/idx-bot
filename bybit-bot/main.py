@@ -31,7 +31,7 @@ from config import (
 )
 import db
 from scanner import MarketScanner
-from strategy import analyze, is_pucuk, is_pump_candle, calc_atr, is_bullish_structure
+from strategy import analyze, diagnose_analyze, is_pucuk, is_pump_candle, calc_atr, is_bullish_structure
 from risk_manager import calculate_leverage, calculate_position_size, calculate_trailing_sl
 from executor import BybitExecutor
 
@@ -718,6 +718,71 @@ async def api_state():
 @app.get("/health")
 async def health():
     return {"status": "ok", "scans": WEB.scans}
+
+
+@app.get("/api/diagnose")
+async def api_diagnose():
+    """Run diagnose_analyze on all scanned coins and return rejection breakdown."""
+    try:
+        # Use the already-loaded scanner from global state
+        coins = WEB.alpha_coins[:20]  # Top 20 coins
+        if not coins:
+            return JSONResponse({'error': 'No coins scanned yet', 'scans': WEB.scans})
+
+        # We need scanner reference — get it from app state
+        results = []
+        failure_counts = {}
+
+        for coin in coins:
+            for tf in TIMEFRAMES:
+                try:
+                    # Fetch fresh OHLCV data
+                    import ccxt
+                    ex = ccxt.bybit({
+                        'apiKey': BYBIT_API_KEY, 'secret': BYBIT_API_SECRET,
+                        'options': {'defaultType': 'swap'},
+                    })
+                    ohlcv = ex.fetch_ohlcv(coin['symbol'], tf, limit=150)
+                    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+
+                    reason = diagnose_analyze(df, coin['symbol'], tf)
+                    results.append({
+                        'coin': coin.get('base', coin['symbol']),
+                        'tf': tf,
+                        'reason': reason,
+                        'passed': reason.startswith('✅'),
+                    })
+
+                    # Count failures by step
+                    if not reason.startswith('✅'):
+                        step = reason.split(':')[0]
+                        failure_counts[step] = failure_counts.get(step, 0) + 1
+
+                    ex.close()
+                except Exception as e:
+                    results.append({
+                        'coin': coin.get('base', '?'),
+                        'tf': tf,
+                        'reason': f'ERROR: {str(e)[:80]}',
+                        'passed': False,
+                    })
+
+                import time
+                time.sleep(0.15)
+
+        passes = sum(1 for r in results if r['passed'])
+        sorted_failures = sorted(failure_counts.items(), key=lambda x: -x[1])
+
+        return JSONResponse({
+            'total': len(results),
+            'passed': passes,
+            'failed': len(results) - passes,
+            'failure_breakdown': sorted_failures,
+            'results': results,
+        })
+
+    except Exception as e:
+        return JSONResponse({'error': str(e)}, status_code=500)
 
 
 # ══════════════════════════════════════════════════════════════

@@ -344,6 +344,149 @@ def check_breakout(df: pd.DataFrame, resistance: float,
 # ══════════════════════════════════════════════════════════════
 
 
+def diagnose_analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
+    """
+    DIAGNOSTIC VERSION of analyze(). 
+    Returns a human-readable string explaining WHERE the signal was rejected.
+    Used by /api/diagnose endpoint. Does NOT affect trading.
+    """
+    if df is None or len(df) < 50:
+        return f"FAIL: df too short ({len(df) if df is not None else 0})"
+
+    atr = calc_atr(df, 14)
+    current_price = df['close'].iloc[-1]
+    p_lows = detect_pivot_lows(df)
+    p_highs = detect_pivot_highs(df)
+
+    if len(p_lows) < 2:
+        return f"Step1: Only {len(p_lows)} pivot lows"
+
+    has_hl, hl_indices = detect_higher_lows(df, p_lows)
+    if not has_hl or len(hl_indices) < 2:
+        return f"Step2: No HL (has_hl={has_hl}, n={len(hl_indices) if hl_indices else 0})"
+
+    first_hl_idx = hl_indices[0]
+    last_hl_idx = hl_indices[-1]
+    first_hl_price = min(df['open'].iloc[first_hl_idx], df['close'].iloc[first_hl_idx])
+    last_hl_price = min(df['open'].iloc[last_hl_idx], df['close'].iloc[last_hl_idx])
+
+    if last_hl_price <= first_hl_price:
+        return f"Step3: Trendline NOT ascending"
+    candle_span = last_hl_idx - first_hl_idx
+    if candle_span <= 0:
+        return f"Step3: candle_span=0"
+    slope_pct = ((last_hl_price - first_hl_price) / candle_span / first_hl_price) * 100
+    if slope_pct > 0.5:
+        return f"Step3: Slope too steep ({slope_pct:.3f}%/candle)"
+
+    total_hl_range_pct = ((last_hl_price - first_hl_price) / first_hl_price) * 100
+    if total_hl_range_pct < MIN_ASCENDING_RANGE_PCT:
+        return f"Step3a: HL range too small ({total_hl_range_pct:.2f}%)"
+
+    # Flat resistance
+    FLAT_TOL = 2.0
+    flat_resistance_level = None
+    if len(p_highs) >= 2:
+        relevant_highs = [i for i in p_highs if i >= first_hl_idx]
+        if len(relevant_highs) >= 2:
+            ph_prices = [df['high'].iloc[i] for i in relevant_highs[-5:]]
+            ph_max, ph_min = max(ph_prices), min(ph_prices)
+            spread_pct = ((ph_max - ph_min) / ph_max) * 100
+            dist_last = ((ph_max - ph_prices[-1]) / ph_max) * 100
+            if spread_pct <= FLAT_TOL and dist_last <= 2.0:
+                flat_resistance_level = (ph_max + ph_min) / 2
+            else:
+                return f"Step3b: Resis NOT flat (spread={spread_pct:.2f}% tol={FLAT_TOL}%)"
+        else:
+            return f"Step3b: Only {len(relevant_highs)} relevant highs"
+    else:
+        return f"Step3b: Only {len(p_highs)} pivot highs"
+
+    if current_price >= flat_resistance_level * 1.005:
+        return f"Breakout: price above resistance"
+
+    gap_first = ((flat_resistance_level - first_hl_price) / flat_resistance_level) * 100
+    gap_last = ((flat_resistance_level - last_hl_price) / flat_resistance_level) * 100
+    if gap_last >= gap_first:
+        return f"Compress: no compression (gap_last={gap_last:.2f}%>=gap_first={gap_first:.2f}%)"
+    if gap_last > 4.5:
+        return f"Compress: gap too wide ({gap_last:.2f}%)"
+
+    # Retest count
+    res_tol = flat_resistance_level * 0.025
+    retest_events = 0
+    in_zone = False
+    for k in range(first_hl_idx, len(df)):
+        near = df['high'].iloc[k] >= flat_resistance_level - res_tol
+        if near and not in_zone:
+            retest_events += 1
+            in_zone = True
+        elif not near:
+            in_zone = False
+
+    trendline_price = _calc_trendline_value(df, hl_indices)
+    if not trendline_price or trendline_price <= 0:
+        candles_since = (len(df) - 1) - hl_indices[-1]
+        return f"Step5: No trendline (candles_since_HL={candles_since}, max=15)"
+
+    if len(hl_indices) < MIN_HL_TOUCHES or len(hl_indices) > MAX_HL_TOUCHES:
+        return f"HL count {len(hl_indices)} outside [{MIN_HL_TOUCHES},{MAX_HL_TOUCHES}]"
+
+    # TAHAP A: Pullback
+    if len(df) >= 7:
+        lb = df.iloc[-7:-1]
+        max_hi = lb['high'].max()
+        origin_pct = ((max_hi - trendline_price) / trendline_price) * 100
+        if origin_pct < 1.0:
+            return f"StepA: Never above trendline (origin={origin_pct:.2f}%<1.0%)"
+        bear_n = sum(1 for _, c in lb.iterrows() if c['close'] < c['open'])
+        if bear_n < 2:
+            return f"StepA: Only {bear_n}/6 bearish candles (<2)"
+
+    # TAHAP B: Touch
+    tri_range = flat_resistance_level - trendline_price
+    if tri_range <= 0:
+        return f"StepB: trendline>=resistance"
+    pos_pct = ((current_price - trendline_price) / tri_range) * 100
+    if pos_pct > 40.0:
+        return f"StepB: Too high in triangle ({pos_pct:.1f}%>40%)"
+    if pos_pct < -15.0:
+        return f"StepB: Below trendline ({pos_pct:.1f}%)"
+    dist_pct = ((current_price - trendline_price) / trendline_price) * 100
+    if dist_pct < -1.5 or dist_pct > 1.5:
+        return f"StepB: Far from trendline ({dist_pct:.2f}% vs ±1.5%)"
+    res_dist = ((flat_resistance_level - current_price) / flat_resistance_level) * 100
+    if res_dist < 2.0:
+        return f"StepB: Too close to resistance ({res_dist:.2f}%<2%)"
+
+    # TAHAP C: Bounce
+    if len(df) >= 2:
+        ec = df.iloc[-1]
+        body = ec['close'] - ec['open']
+        rng = ec['high'] - ec['low']
+        lw = min(ec['open'], ec['close']) - ec['low']
+        is_bull = body > 0
+        has_wick = rng > 0 and (lw / rng) > 0.4
+        if not is_bull and not has_wick:
+            return f"StepC: No bounce (bull={is_bull}, wick={has_wick})"
+        low_dist = ((ec['low'] - trendline_price) / trendline_price) * 100
+        if low_dist > 2.0 or low_dist < -2.0:
+            return f"StepC: Low not near trendline ({low_dist:.2f}%)"
+
+    if retest_events < 2:
+        return f"Retests: only {retest_events} (<2)"
+    if retest_events > MAX_RESISTANCE_RETEST:
+        return f"Retests: too many ({retest_events}>{MAX_RESISTANCE_RETEST})"
+
+    if is_pump_candle(df, atr):
+        return f"Step9: Pump candle"
+
+    recent_high = df['high'].iloc[-30:].max()
+    total_rise = ((recent_high - first_hl_price) / first_hl_price) * 100
+    if total_rise > 25.0:
+        return f"Rise: too high ({total_rise:.1f}%>25%)"
+
+    return f"✅ PASS HL={len(hl_indices)} ret={retest_events} pos={pos_pct:.0f}% dist={dist_pct:.2f}%"
 
 
 # ══════════════════════════════════════════════════════════════

@@ -363,7 +363,14 @@ def diagnose_analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
 
     has_hl, hl_indices = detect_higher_lows(df, p_lows)
     if not has_hl or len(hl_indices) < 2:
-        return f"Step2: No HL (has_hl={has_hl}, n={len(hl_indices) if hl_indices else 0})"
+        body_lows = df[['open', 'close']].min(axis=1).values
+        pivot_prices = [round(body_lows[i], 6) for i in p_lows[-6:]]
+        pivot_idxs = p_lows[-6:]
+        gaps = [pivot_idxs[j] - pivot_idxs[j-1] for j in range(1, len(pivot_idxs))]
+        asc = [body_lows[pivot_idxs[j]] > body_lows[pivot_idxs[j-1]] for j in range(1, len(pivot_idxs))]
+        last_dist = len(df) - 1 - p_lows[-1] if p_lows else 99
+        return (f"Step2: No HL (pivots={len(p_lows)}, seq={len(hl_indices) if hl_indices else 0}, "
+                f"last_dist={last_dist}, prices={pivot_prices}, gaps={gaps}, asc={asc})")
 
     first_hl_idx = hl_indices[0]
     last_hl_idx = hl_indices[-1]

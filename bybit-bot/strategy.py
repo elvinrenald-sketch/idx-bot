@@ -208,10 +208,8 @@ def detect_higher_lows(df: pd.DataFrame, pivot_indices: List[int],
             if prev_price > 0:
                 price_jump_pct = ((curr_price - prev_price) / prev_price) * 100
                 if price_jump_pct > MAX_HL_PRICE_JUMP_PCT:
-                    # Loncatan terlalu besar — reset sequence
-                    if len(current_seq) > len(best_seq):
-                        best_seq = current_seq[:]
-                    current_seq = [curr_idx]
+                    # Loncatan terlalu besar — SKIP pivot ini saja, jangan reset chain
+                    # Satu outlier tidak membatalkan ascending trend keseluruhan
                     continue
 
             current_seq.append(curr_idx)
@@ -392,8 +390,6 @@ def diagnose_analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
             if body_lows[ci] > body_lows[si]:
                 jmp = ((body_lows[ci]-body_lows[si])/body_lows[si])*100 if body_lows[si]>0 else 0
                 if jmp > MAX_HL_PRICE_JUMP_PCT:
-                    if len(cur)>len(best): best=cur[:]
-                    cur=[ci]
                     trace.append(f"JMP{jmp:.1f}")
                     continue
                 cur.append(ci)

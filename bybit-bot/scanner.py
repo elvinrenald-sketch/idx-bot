@@ -332,10 +332,19 @@ class MarketScanner:
                 if symbol in BLACKLIST_SYMBOLS:
                     continue
 
-                # Market Cap Filter: EXCLUDE top 110 — hanya scan koin KECIL di luar top 110
-                if mcap_symbols and base.upper() in mcap_symbols:
-                    mcap_filtered += 1
-                    continue
+                # Market Cap Filter: EXCLUDE top 100 — hanya scan koin KECIL di luar top 100
+                # Handle Bybit naming: 1000PEPE->PEPE, SHIB1000->SHIB, 1000BONK->BONK
+                if mcap_symbols:
+                    base_upper = base.upper()
+                    # Normalize: strip "1000" prefix/suffix for matching
+                    normalized = base_upper
+                    if normalized.startswith('1000'):
+                        normalized = normalized[4:]
+                    elif normalized.endswith('1000'):
+                        normalized = normalized[:-4]
+                    if base_upper in mcap_symbols or normalized in mcap_symbols:
+                        mcap_filtered += 1
+                        continue
 
                 bid = float(ticker.get('bid', 0) or 0)
                 ask = float(ticker.get('ask', 0) or 0)

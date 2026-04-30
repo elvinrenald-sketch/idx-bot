@@ -31,7 +31,7 @@ PIVOT_RIGHT    = 3     # [Tuned] Turunkan ke 3 agar entry lebih cepat tanpa meng
 
 # Higher Low
 MIN_HL_TOUCHES    = 2   # Minimal 2 higher low touches pada trendline
-MAX_HL_TOUCHES    = 6   # Maksimal 6 touches (diubah dari 4 agar tidak menolak tren kuat)
+MAX_HL_TOUCHES    = 4   # Maksimal 4 touches (lebih dari ini = stale pattern)
 MIN_HL_CANDLE_GAP = 3   # [Tuned] Jarak minimal antar HL agar bisa menangkap tren agresif
 MAX_HL_CANDLE_GAP = 40  # [NEW] Jarak MAKSIMAL antar HL berurutan (candle). >40 = HL terlalu jauh, bukan tren kohesif
 MAX_HL_PRICE_JUMP_PCT = 15.0  # [FIX] Crypto altcoins swing 10-15% between lows normally

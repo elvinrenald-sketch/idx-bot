@@ -14,7 +14,7 @@ from config import (
     MAX_RESISTANCE_RETEST,
     ACCUM_MIN_CANDLES, ACCUM_MAX_RANGE_PCT,
     VOLUME_BREAKOUT_MULT,
-    SL_BUFFER_PCT, DEFAULT_RR_RATIO,
+    SL_BUFFER_PCT, MIN_SL_PCT, DEFAULT_RR_RATIO,
     TRENDLINE_TOLERANCE_PCT, DEMAND_TOLERANCE_PCT,
     PUCUK_SMA_DISTANCE_PCT,
     MIN_H4_CANDLES_FOR_STRUCTURE, MIN_D1_CANDLES_FOR_STRUCTURE,
@@ -224,7 +224,7 @@ def detect_higher_lows(df: pd.DataFrame, pivot_indices: List[int],
     # We need the HL sequence to be recent (last HL within last 50 candles)
     # AND within the allowed touch range (2-5)
     # 50 candles: H1=50jam(2hari), H4=200jam(8hari) — cukup untuk swing trading
-    if best_seq and best_seq[-1] >= len(df) - 50 and min_touches <= len(best_seq) <= max_touches:
+    if best_seq and best_seq[-1] >= len(df) - 80 and min_touches <= len(best_seq) <= max_touches:
         return True, best_seq
 
 
@@ -423,7 +423,7 @@ def diagnose_analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
         return f"Step3a: HL range too small ({total_hl_range_pct:.2f}%)"
 
     # Flat resistance
-    FLAT_TOL = 2.0
+    FLAT_TOL = 6.0
     flat_resistance_level = None
     if len(p_highs) >= 2:
         relevant_highs = [i for i in p_highs if i >= first_hl_idx]
@@ -432,10 +432,10 @@ def diagnose_analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
             ph_max, ph_min = max(ph_prices), min(ph_prices)
             spread_pct = ((ph_max - ph_min) / ph_max) * 100
             dist_last = ((ph_max - ph_prices[-1]) / ph_max) * 100
-            if spread_pct <= FLAT_TOL and dist_last <= 2.0:
+            if spread_pct <= FLAT_TOL and dist_last <= 4.0:
                 flat_resistance_level = (ph_max + ph_min) / 2
             else:
-                return f"Step3b: Resis NOT flat (spread={spread_pct:.2f}% tol={FLAT_TOL}%)"
+                return f"Step3b: Resis NOT flat (spread={spread_pct:.2f}% dist_last={dist_last:.2f}% tol={FLAT_TOL}%)"
         else:
             return f"Step3b: Only {len(relevant_highs)} relevant highs"
     else:
@@ -448,7 +448,7 @@ def diagnose_analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
     gap_last = ((flat_resistance_level - last_hl_price) / flat_resistance_level) * 100
     if gap_last >= gap_first:
         return f"Compress: no compression (gap_last={gap_last:.2f}%>=gap_first={gap_first:.2f}%)"
-    if gap_last > 4.5:
+    if gap_last > 15.0:
         return f"Compress: gap too wide ({gap_last:.2f}%)"
 
     # Retest count
@@ -466,7 +466,7 @@ def diagnose_analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
     trendline_price = _calc_trendline_value(df, hl_indices)
     if not trendline_price or trendline_price <= 0:
         candles_since = (len(df) - 1) - hl_indices[-1]
-        return f"Step5: No trendline (candles_since_HL={candles_since}, max=15)"
+        return f"Step5: No trendline (candles_since_HL={candles_since}, max=40)"
 
     if len(hl_indices) < MIN_HL_TOUCHES or len(hl_indices) > MAX_HL_TOUCHES:
         return f"HL count {len(hl_indices)} outside [{MIN_HL_TOUCHES},{MAX_HL_TOUCHES}]"
@@ -476,11 +476,11 @@ def diagnose_analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
         lb = df.iloc[-7:-1]
         max_hi = lb['high'].max()
         origin_pct = ((max_hi - trendline_price) / trendline_price) * 100
-        if origin_pct < 1.0:
-            return f"StepA: Never above trendline (origin={origin_pct:.2f}%<1.0%)"
+        if origin_pct < 0.5:
+            return f"StepA: Never above trendline (origin={origin_pct:.2f}%<0.5%)"
         bear_n = sum(1 for _, c in lb.iterrows() if c['close'] < c['open'])
-        if bear_n < 2:
-            return f"StepA: Only {bear_n}/6 bearish candles (<2)"
+        if bear_n < 1:
+            return f"StepA: Only {bear_n}/20 bearish candles (<1)"
 
     # TAHAP B: Touch
     tri_range = flat_resistance_level - trendline_price
@@ -492,8 +492,8 @@ def diagnose_analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
     if pos_pct < -15.0:
         return f"StepB: Below trendline ({pos_pct:.1f}%)"
     dist_pct = ((current_price - trendline_price) / trendline_price) * 100
-    if dist_pct < -1.5 or dist_pct > 1.5:
-        return f"StepB: Far from trendline ({dist_pct:.2f}% vs ±1.5%)"
+    if dist_pct < -TRENDLINE_TOLERANCE_PCT or dist_pct > TRENDLINE_TOLERANCE_PCT:
+        return f"StepB: Far from trendline ({dist_pct:.2f}% vs ±{TRENDLINE_TOLERANCE_PCT}%)"
     res_dist = ((flat_resistance_level - current_price) / flat_resistance_level) * 100
     if res_dist < 2.0:
         return f"StepB: Too close to resistance ({res_dist:.2f}%<2%)"
@@ -595,30 +595,33 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
 
         # -- Step 3b: FLAT RESISTANCE (Atap Datar) --
         # Ascending Triangle: Pivot High cluster di level yang HAMPIR sama
-        # Di real market, resistance tidak 100% flat — toleransi 2.0% untuk ascending triangle sejati
-        FLAT_RESISTANCE_TOLERANCE = 2.0  # max 2.0% perbedaan antar Pivot High (3% terlalu lebar)
+        # Toleransi 3% antar pivot high — ketat tapi realistis
+        FLAT_RESISTANCE_TOLERANCE = 3.0  # max 3% perbedaan antar Pivot High
         flat_resistance_valid = False
         flat_resistance_level = None
 
-        if len(p_highs) >= 2:
+        if len(p_highs) >= 1:
             # Ambil pivot high yang relevan: hanya yang berada dalam rentang HL pertama hingga sekarang
             relevant_highs = [i for i in p_highs if i >= first_hl_idx]
-            if len(relevant_highs) >= 2:
+            if len(relevant_highs) >= 1:
                 # Ambil harga-harga pivot high terbaru (menggunakan wick HIGH untuk ceiling)
                 ph_prices = [df['high'].iloc[i] for i in relevant_highs[-5:]]
                 ph_max = max(ph_prices)
                 ph_min = min(ph_prices)
                 last_ph = ph_prices[-1]
-                
-                # Cek apakah semua Pivot High berkumpul dalam toleransi 2%
-                spread_pct = ((ph_max - ph_min) / ph_max) * 100
-                
-                # Pucuk terakhir HARUS mengetes resistance (tidak boleh membentuk lower high yang jauh)
-                distance_last_to_max = ((ph_max - last_ph) / ph_max) * 100
-                
-                if spread_pct <= FLAT_RESISTANCE_TOLERANCE and distance_last_to_max <= 2.0 and len(ph_prices) >= 2:
+
+                if len(ph_prices) == 1:
+                    # Hanya 1 pivot high — gunakan langsung sebagai resistance
                     flat_resistance_valid = True
-                    flat_resistance_level = (ph_max + ph_min) / 2
+                    flat_resistance_level = ph_max
+                else:
+                    # Multiple pivot highs — cek cluster dalam toleransi 3.3%
+                    spread_pct = ((ph_max - ph_min) / ph_max) * 100
+                    distance_last_to_max = ((ph_max - last_ph) / ph_max) * 100
+
+                    if spread_pct <= FLAT_RESISTANCE_TOLERANCE and distance_last_to_max <= 4.0:
+                        flat_resistance_valid = True
+                        flat_resistance_level = (ph_max + ph_min) / 2
 
         if not flat_resistance_valid:
             return None  # Bukan Ascending Triangle sejati
@@ -636,7 +639,7 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             
         # Minta Jarak HL terakhir ke demand/resistance TIDAK TERLALU JAUH (max 4.5%)
         # Semakin kecil persentasenya, semakin ketat kompresinya
-        if gap_last_to_resistance > 4.5:
+        if gap_last_to_resistance > 15.0:
             return None  # Jarak HL ke resistance masih terlalu jauh (kurang menyempit)
 
         # ALPHA: Hitung compression percentage (untuk filter downstream)
@@ -650,7 +653,7 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         # Seperti chart DASH: zona $36 yang terus di-retest dari bawah
         # Hitung berapa kali harga menyentuh flat resistance ini
         resistance_retest_count = 0
-        resistance_tolerance = flat_resistance_level * 0.025  # 2.5% tolerance zona
+        resistance_tolerance = flat_resistance_level * 0.03  # 3% tolerance zona
 
         for k in range(first_hl_idx, len(df)):
             candle_wick_high = df['high'].iloc[k]
@@ -713,23 +716,22 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         # ═══ TAHAP A: PULLBACK CONFIRMED ═══
         # Harga HARUS pernah di atas trendline baru-baru ini (bukti ada pullback)
         # Cek 5 candle sebelum candle saat ini
-        if len(df) >= 7:
-            lookback_candles = df.iloc[-7:-1]  # 5-6 candle sebelum current
+        if len(df) >= 22:
+            lookback_candles = df.iloc[-21:-1]  # 20 candle sebelum current
             max_recent_high = lookback_candles['high'].max()
             pullback_origin_pct = ((max_recent_high - trendline_price) / trendline_price) * 100
             
-            # Harga harus pernah minimal 1.0% DI ATAS trendline dalam 6 candle terakhir
-            # Ini membuktikan ada "turun dari atas" = pullback nyata
-            if pullback_origin_pct < 1.0:
-                return None  # Harga tidak pernah di atas trendline — bukan pullback, cuma sideways
+            # Harga harus pernah minimal 0.5% DI ATAS trendline
+            if pullback_origin_pct < 0.5:
+                return None  # Harga tidak pernah di atas trendline
 
             # Minimal 2 dari 5 candle sebelumnya harus bearish (bukti penurunan)
             bearish_count = 0
             for _, c in lookback_candles.iterrows():
                 if c['close'] < c['open']:
                     bearish_count += 1
-            if bearish_count < 2:
-                return None  # Tidak ada candle bearish = tidak ada pullback nyata
+            if bearish_count < 1:
+                return None  # Tidak ada candle bearish = tidak ada pullback
 
         # ═══ TAHAP B: TOUCH — Harga di zona trendline support ═══
         # Hitung posisi harga dalam triangle
@@ -740,7 +742,7 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         # Posisi harga: 0% = tepat di trendline, 100% = tepat di resistance
         price_position_pct = ((current_price - trendline_price) / triangle_range) * 100
 
-        # Entry hanya di BOTTOM 40% triangle
+        # Entry hanya di BOTTOM 40% triangle — STRICT di dekat HL
         if price_position_pct > 40.0:
             return None  # ❌ Terlalu dekat resistance
 
@@ -748,10 +750,10 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         if price_position_pct < -15.0:
             return None  # ❌ Sudah jauh di bawah trendline
 
-        # Harga harus DEKAT trendline support (±1.5%)
+        # Harga harus DEKAT trendline HL support (±TRENDLINE_TOLERANCE_PCT)
         trendline_distance_pct = ((current_price - trendline_price) / trendline_price) * 100
-        if trendline_distance_pct < -1.5 or trendline_distance_pct > 1.5:
-            return None  # Terlalu jauh dari trendline
+        if trendline_distance_pct < -TRENDLINE_TOLERANCE_PCT or trendline_distance_pct > TRENDLINE_TOLERANCE_PCT:
+            return None  # Terlalu jauh dari HL trendline
 
         # Jarak ke resistance harus JAUH (minimal 2% di bawah resistance)
         resistance_distance_pct = ((flat_resistance_level - current_price) / flat_resistance_level) * 100
@@ -759,28 +761,26 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             return None  # ❌ Terlalu dekat resistance
 
         # ═══ TAHAP C: BOUNCE — Candle saat ini menunjukkan rejection di trendline ═══
-        # Di HL yang valid, candle entry itu BULLISH (buyer masuk di support)
-        # ATAU punya lower wick panjang (buyer reject harga lebih rendah)
         if len(df) >= 2:
             entry_candle = df.iloc[-1]
             candle_body = entry_candle['close'] - entry_candle['open']
             candle_range = entry_candle['high'] - entry_candle['low']
             lower_wick = min(entry_candle['open'], entry_candle['close']) - entry_candle['low']
 
-            is_bullish = candle_body > 0  # Close > Open = bullish
-            has_wick_rejection = candle_range > 0 and (lower_wick / candle_range) > 0.4  # Long lower wick
+            is_bullish = candle_body > 0
+            has_wick_rejection = candle_range > 0 and (lower_wick / candle_range) > 0.4
 
             if not is_bullish and not has_wick_rejection:
-                return None  # ❌ Tidak ada sinyal bounce di trendline — belum waktunya entry
+                return None  # ❌ Tidak ada sinyal bounce di trendline
 
-            # Extra: LOW candle harus DEKAT trendline (menyentuh zona support)
+            # LOW candle harus DEKAT trendline (±TRENDLINE_TOLERANCE_PCT)
             candle_low = entry_candle['low']
             low_to_trendline_pct = ((candle_low - trendline_price) / trendline_price) * 100
-            if low_to_trendline_pct > 2.0 or low_to_trendline_pct < -2.0:
-                return None  # Low candle tidak menyentuh zona trendline
+            if low_to_trendline_pct > TRENDLINE_TOLERANCE_PCT or low_to_trendline_pct < -TRENDLINE_TOLERANCE_PCT:
+                return None  # Low candle tidak menyentuh zona HL trendline
 
-        # Konfirmasi: resistance sudah di-retest minimal 2x (atap datar terbukti)
-        if retest_events < 2:
+        # Konfirmasi: resistance sudah di-retest minimal 1x (atap terdeteksi)
+        if retest_events < 1:
             return None  # Atap belum cukup terkonfirmasi
 
         if retest_events > MAX_RESISTANCE_RETEST:
@@ -808,16 +808,20 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
         trendline_sl = trendline_price * (1 - SL_BUFFER_PCT / 100)
         sl_price = max(trendline_sl, entry_price - atr_sl_distance)
 
-        min_sl_pct = atr_mult / 100.0
-        min_sl_floor = entry_price * min_sl_pct
+        # Floor: SL MINIMUM 2.5% dari entry (anti-wick noise koin low-ATR)
+        min_sl_floor = entry_price * (MIN_SL_PCT / 100.0)
         if (entry_price - sl_price) < min_sl_floor:
             sl_price = entry_price - min_sl_floor
 
         sl_distance = entry_price - sl_price
         rr_tp = entry_price + (sl_distance * DEFAULT_RR_RATIO)
-        # TP = minimum dari RR-based TP dan resistance level
-        # Ascending triangle: target natural adalah resistance, bukan breakout harapan
-        tp_price = min(rr_tp, flat_resistance_level * 0.998)  # 0.2% di bawah resistance
+        tp_price = rr_tp  # TP murni berdasarkan RR 1:1.3, tidak di-cap resistance
+
+        # ═══ RR GUARD: Skip jika RR actual < 1.0 setelah TP di-cap resistance ═══
+        tp_distance = tp_price - entry_price
+        actual_rr = tp_distance / sl_distance if sl_distance > 0 else 0
+        if actual_rr < 1.0:
+            return None  # ❌ RR terlalu jelek, SL lebih lebar dari TP
 
         sl_pct = ((entry_price - sl_price) / entry_price) * 100
         tp_pct = ((tp_price - entry_price) / entry_price) * 100
@@ -852,7 +856,7 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
             'tp_price': round(tp_price, 8),
             'sl_pct': round(sl_pct, 2),
             'tp_pct': round(tp_pct, 2),
-            'rr_ratio': round(DEFAULT_RR_RATIO, 1),
+            'rr_ratio': round(actual_rr, 2),
             'resistance': round(resistance, 8) if resistance else 0,
             'support': round(support, 8),
             'higher_lows': hl_prices,
@@ -880,6 +884,469 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
 
     except Exception as e:
         log.error(f"Strategy error for {symbol} {timeframe}: {e}")
+        return None
+
+
+# ══════════════════════════════════════════════════════════════
+# ANALYZE LH SHORT — Lower High Descending Triangle (H1)
+# Mirror dari Ascending Triangle LONG
+# Entry: rejection dari resistance trendline LH
+# ══════════════════════════════════════════════════════════════
+
+def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
+    """
+    Kalimasada v7.1 — DESCENDING TRENDLINE REJECTION SHORT
+
+    Mirror dari ascending triangle LONG (disederhanakan):
+    - Deteksi Lower Highs (LH) → trendline resistance MENURUN
+    - Entry saat harga mendekati trendline resistance dan DITOLAK
+    - TANPA flat support requirement (downtrend tidak punya lantai)
+    - SL di atas trendline, TP ke bawah (RR 1:1.3)
+    """
+    if df is None or len(df) < 60:
+        return None
+
+    SHORT_TRENDLINE_TOLERANCE = 0.20  # ULTRA STRICT — entry harus SANGAT DEKAT trendline resistance (0.20%)
+
+    try:
+        atr = calc_atr(df, 14)
+        current_price = df['close'].iloc[-1]
+
+        # ═══ STEP 1: DETECT LOWER HIGHS ═══
+
+        p_highs = detect_pivot_highs(df)
+
+        if len(p_highs) < 2:
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: < 2 pivot highs ({len(p_highs)})")
+            return None
+
+        has_lh, lh_indices = detect_lower_highs(df, p_highs)
+        if not has_lh or len(lh_indices) < 2:
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no LH pattern")
+            return None
+
+        # ═══ STEP 2: VALIDATE DESCENDING RANGE ═══
+
+        first_lh_idx = lh_indices[0]
+        last_lh_idx = lh_indices[-1]
+        first_lh_price = float(df['high'].iloc[first_lh_idx])
+        last_lh_price = float(df['high'].iloc[last_lh_idx])
+
+        if last_lh_price >= first_lh_price:
+            return None  # Not descending
+
+        candle_span = last_lh_idx - first_lh_idx
+        if candle_span <= 0:
+            return None
+
+        total_lh_range_pct = ((first_lh_price - last_lh_price) / first_lh_price) * 100
+        if total_lh_range_pct < MIN_ASCENDING_RANGE_PCT:
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: range {total_lh_range_pct:.1f}% < {MIN_ASCENDING_RANGE_PCT}%")
+            return None
+
+        slope_per_candle = (last_lh_price - first_lh_price) / candle_span
+        slope_pct_per_candle = abs((slope_per_candle / first_lh_price) * 100)
+        if slope_pct_per_candle > 1.0:
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: slope too steep {slope_pct_per_candle:.2f}%/candle")
+            return None
+
+        # ═══ STEP 3: RESISTANCE TRENDLINE ═══
+
+        trendline_price = _calc_resistance_trendline(df, lh_indices)
+        if not trendline_price or trendline_price <= 0:
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: trendline calc failed")
+            return None
+
+        # ═══ STEP 4: ENTRY VALIDATION — harga dekat resistance ═══
+
+        # Harga harus di BAWAH trendline resistance
+        if current_price >= trendline_price:
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: price {current_price:.4f} >= trendline {trendline_price:.4f}")
+            return None
+
+        # Harga harus DEKAT trendline resistance (dalam SHORT_TRENDLINE_TOLERANCE %)
+        trendline_distance_pct = ((trendline_price - current_price) / trendline_price) * 100
+        if trendline_distance_pct > SHORT_TRENDLINE_TOLERANCE:
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: too far from resistance "
+                      f"({trendline_distance_pct:.2f}% > {SHORT_TRENDLINE_TOLERANCE}%)")
+            return None
+
+        # ═══ BOUNCE-UP VALIDATION (STRICT v2) ═══
+        # Harga harus baru NAIK ke trendline (retest resistance dari bawah)
+        # Bukan free-fall dimana trendline turun mengikuti harga
+        #
+        # CHECK 1: low dari 3-5 candle terakhir harus JAUH di bawah trendline (min 1.5%)
+        lookback_lows = [float(df['low'].iloc[i]) for i in range(-5, -1) if abs(i) <= len(df)]
+        if lookback_lows:
+            recent_min_low = min(lookback_lows)
+            bounce_depth_pct = ((trendline_price - recent_min_low) / trendline_price) * 100
+            if bounce_depth_pct < 2.0:
+                log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no bounce-up detected "
+                          f"(recent low only {bounce_depth_pct:.2f}% below trendline, need ≥2.0%)")
+                return None
+
+        # CHECK 2: Harga harus NAIK mendekati trendline, bukan jatuh
+        # Minimal 1 dari 3 candle terakhir harus bullish (close > open)
+        # DAN close sekarang > close 3 candle lalu (harga bergerak NAIK)
+        if len(df) >= 5:
+            bullish_count = sum(
+                1 for i in range(-3, 0)
+                if df['close'].iloc[i] > df['open'].iloc[i]
+            )
+            price_rising = float(df['close'].iloc[-1]) > float(df['close'].iloc[-4])
+            if bullish_count == 0 and not price_rising:
+                log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: free-fall detected "
+                          f"(0 bullish candles in last 3, price not rising)")
+                return None
+
+        # ═══ STEP 5: BEARISH CONFIRMATION ═══
+
+        entry_candle = df.iloc[-1]
+        candle_body = entry_candle['close'] - entry_candle['open']
+        candle_range = entry_candle['high'] - entry_candle['low']
+        upper_wick = entry_candle['high'] - max(entry_candle['open'], entry_candle['close'])
+
+        is_bearish = candle_body < 0
+        has_wick_rejection = candle_range > 0 and (upper_wick / candle_range) > 0.30  # 30% wick
+
+        if not is_bearish and not has_wick_rejection:
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no bearish confirmation")
+            return None
+
+        # No pump candle
+        if is_pump_candle(df, atr):
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: pump candle detected")
+            return None
+
+        # ═══ SL/TP CALCULATION ═══
+
+        entry_price = current_price
+        current_atr = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else entry_price * 0.02
+
+        atr_mult = ATR_SL_MULT.get(timeframe, ATR_SL_MULT_DEFAULT)
+        atr_sl_distance = current_atr * atr_mult
+
+        # SL: di ATAS trendline resistance
+        trendline_sl = trendline_price * (1 + SL_BUFFER_PCT / 100)
+        sl_price = max(trendline_sl, entry_price + atr_sl_distance)
+
+        # Floor: SL MINIMUM 2.5% dari entry
+        min_sl_floor = entry_price * (MIN_SL_PCT / 100.0)
+        if (sl_price - entry_price) < min_sl_floor:
+            sl_price = entry_price + min_sl_floor
+
+        sl_distance = sl_price - entry_price
+        tp_price = entry_price - (sl_distance * DEFAULT_RR_RATIO)
+
+        # RR Guard
+        tp_distance = entry_price - tp_price
+        actual_rr = tp_distance / sl_distance if sl_distance > 0 else 0
+        if actual_rr < 1.0:
+            return None
+
+        sl_pct = ((sl_price - entry_price) / entry_price) * 100
+        tp_pct = ((entry_price - tp_price) / entry_price) * 100
+
+        entry_type = 'LH_SHORT'
+
+        # Confidence
+        _lh_bonus = min(25, max(0, (len(lh_indices) - 2) * 12))
+        _body_bonus = 10 if (is_bearish and candle_range > 0 and abs(candle_body) / candle_range >= 0.5) else 5
+        _precision_bonus = 15 if trendline_distance_pct <= 0.5 else 10
+        _confidence = min(100, 45 + _lh_bonus + _body_bonus + _precision_bonus)
+
+        lh_prices = [round(float(df['high'].iloc[i]), 6) for i in lh_indices]
+
+        signal = {
+            'symbol': symbol,
+            'timeframe': timeframe,
+            'direction': 'SHORT',
+            'signal_type': entry_type,
+            'entry_price': round(entry_price, 8),
+            'sl_price': round(sl_price, 8),
+            'tp_price': round(tp_price, 8),
+            'sl_pct': round(sl_pct, 2),
+            'tp_pct': round(tp_pct, 2),
+            'rr_ratio': round(actual_rr, 2),
+            'resistance': round(trendline_price, 8),
+            'support': 0,
+            'higher_lows': lh_prices,  # Actually lower highs
+            'hl_touches': len(lh_indices),
+            'flat_resistance': round(trendline_price, 8),
+            'resistance_retest_count': 0,
+            'trendline_price': round(trendline_price, 8),
+            'trendline_slope': round(slope_per_candle, 8),
+            'total_rise_pct': round(total_lh_range_pct, 1),
+            'volume_ratio': 1.0,
+            'vol_at_support_score': 0,
+            'compression_pct': 0,
+            'atr': round(current_atr, 8),
+            'atr_pct': round((current_atr / entry_price) * 100, 2),
+            'confidence': _confidence,
+        }
+
+        log.info(f"🔻 [{entry_type}]: {symbol} {timeframe} | "
+                 f"Entry={entry_price:.6f} SL={sl_price:.6f} TP={tp_price:.6f} | "
+                 f"RR=1:{actual_rr:.1f} | Conf={_confidence} | "
+                 f"LH_touches={len(lh_indices)} | Dist={trendline_distance_pct:.2f}%")
+
+        return signal
+
+    except Exception as e:
+        log.error(f"analyze_lh_short error for {symbol}: {e}")
+        return None
+
+
+# ══════════════════════════════════════════════════════════════
+# ANALYZE BREAKDOWN SHORT — Ascending Triangle Failure
+# MULTI-TIMEFRAME: Pattern di H1/H4, Entry confirmation di M15
+# ══════════════════════════════════════════════════════════════
+
+def analyze_breakdown_short(df_htf: pd.DataFrame, df_m15: pd.DataFrame,
+                            symbol: str, timeframe: str) -> Optional[Dict]:
+    """
+    Kalimasada v7 — BREAKDOWN SHORT (Multi-Timeframe)
+
+    ARSITEKTUR:
+    ┌─────────────────────────────────────────────────┐
+    │  H1/H4 (df_htf) — PATTERN DETECTION            │
+    │  • Deteksi Ascending Triangle                   │
+    │  • Hitung trendline dari Higher Lows             │
+    │  • Validasi flat resistance                      │
+    │  • Minimal 2 HL sudah terbentuk                  │
+    └─────────────────────────────────────────────────┘
+                        ↓
+    ┌─────────────────────────────────────────────────┐
+    │  M15 (df_m15) — ENTRY CONFIRMATION              │
+    │  • Candle terakhir HARUS MERAH (bearish)         │
+    │  • BODY close (bukan wick!) di bawah trendline   │
+    │  • Jarak BODY close ke trendline: 0.20% - 0.51%  │
+    │  • Jika > 0.51% = candle terlalu panjang, SKIP   │
+    │  • Jika < 0.20% = belum cukup konfirmasi, SKIP   │
+    └─────────────────────────────────────────────────┘
+
+    SL/TP menggunakan ATR × multiplier dengan RR 1:1.3
+    """
+    if df_htf is None or len(df_htf) < 50:
+        return None
+    if df_m15 is None or len(df_m15) < 20:
+        return None
+
+    try:
+        # ═══════════════════════════════════════════════════════
+        # PHASE 1: PATTERN DETECTION dari HTF (H1/H4)
+        # ═══════════════════════════════════════════════════════
+
+        atr_htf = calc_atr(df_htf, 14)
+
+        p_lows = detect_pivot_lows(df_htf)
+        p_highs = detect_pivot_highs(df_htf)
+
+        if len(p_lows) < 2:
+            return None
+
+        has_hl, hl_indices = detect_higher_lows(df_htf, p_lows)
+        if not has_hl or len(hl_indices) < 2:
+            return None
+
+        first_hl_idx = hl_indices[0]
+        last_hl_idx = hl_indices[-1]
+        first_hl_price = min(df_htf['open'].iloc[first_hl_idx], df_htf['close'].iloc[first_hl_idx])
+        last_hl_price = min(df_htf['open'].iloc[last_hl_idx], df_htf['close'].iloc[last_hl_idx])
+
+        if last_hl_price <= first_hl_price:
+            return None
+
+        candle_span = last_hl_idx - first_hl_idx
+        if candle_span <= 0:
+            return None
+        slope_per_candle = (last_hl_price - first_hl_price) / candle_span
+        slope_pct_per_candle = (slope_per_candle / first_hl_price) * 100
+
+        if slope_pct_per_candle > 1.0:
+            return None
+
+        total_hl_range_pct = ((last_hl_price - first_hl_price) / first_hl_price) * 100
+        if total_hl_range_pct < MIN_ASCENDING_RANGE_PCT:
+            return None
+
+        # -- FLAT RESISTANCE --
+        FLAT_RESISTANCE_TOLERANCE = 3.0
+        flat_resistance_valid = False
+        flat_resistance_level = None
+
+        if len(p_highs) >= 1:
+            relevant_highs = [i for i in p_highs if i >= first_hl_idx]
+            if len(relevant_highs) >= 1:
+                ph_prices = [df_htf['high'].iloc[i] for i in relevant_highs[-5:]]
+                ph_max = max(ph_prices)
+                ph_min = min(ph_prices)
+                last_ph = ph_prices[-1]
+
+                if len(ph_prices) == 1:
+                    flat_resistance_valid = True
+                    flat_resistance_level = ph_max
+                else:
+                    spread_pct = ((ph_max - ph_min) / ph_max) * 100
+                    distance_last_to_max = ((ph_max - last_ph) / ph_max) * 100
+                    if spread_pct <= FLAT_RESISTANCE_TOLERANCE and distance_last_to_max <= 4.0:
+                        flat_resistance_valid = True
+                        flat_resistance_level = (ph_max + ph_min) / 2
+
+        if not flat_resistance_valid:
+            return None
+
+        # -- Trendline value (dari HTF) --
+        trendline_price = _calc_trendline_value(df_htf, hl_indices)
+        if not trendline_price or trendline_price <= 0:
+            return None
+
+        # ═══════════════════════════════════════════════════════
+        # PHASE 2: ENTRY CONFIRMATION dari M15
+        # Bot melihat candle M15 terakhir yang sudah CLOSED
+        # ═══════════════════════════════════════════════════════
+
+        m15_candle = df_m15.iloc[-1]
+        m15_open = m15_candle['open']
+        m15_close = m15_candle['close']
+        m15_high = m15_candle['high']
+        m15_low = m15_candle['low']
+        m15_range = m15_high - m15_low
+
+        # Syarat 1: Candle M15 HARUS MERAH (bearish)
+        if m15_close >= m15_open:
+            return None  # Candle hijau = bukan breakdown
+
+        # Syarat 2: BODY close (bukan wick!) harus di BAWAH trendline
+        if m15_close >= trendline_price:
+            return None  # Body masih di atas trendline
+
+        # Syarat 3: JARAK BODY CLOSE ke trendline harus TEPAT 0.20% - 0.51%
+        # KUNCI UTAMA keamanan:
+        # - < 0.20% = terlalu tipis, belum pasti breakdown
+        # - > 0.51% = candle terlalu panjang/besar, BERBAHAYA
+        body_below_trendline_pct = ((trendline_price - m15_close) / trendline_price) * 100
+
+        if body_below_trendline_pct < 0.20:
+            return None  # Terlalu tipis, belum konfirmasi
+
+        if body_below_trendline_pct > 0.51:
+            return None  # Candle terlalu panjang ke bawah, BERBAHAYA
+
+        # Syarat 4: OPEN candle M15 harus di ATAS atau DEKAT trendline
+        # Memastikan candle MENEMBUS trendline (bukan sudah jauh di bawah)
+        open_vs_trendline_pct = ((m15_open - trendline_price) / trendline_price) * 100
+        if open_vs_trendline_pct < -0.5:
+            return None  # Open sudah jauh di bawah trendline = bukan breakdown segar
+
+        # Syarat 5: Body candle harus solid (bukan doji)
+        m15_body = abs(m15_open - m15_close)
+        body_ratio = 0
+        if m15_range > 0:
+            body_ratio = m15_body / m15_range
+            if body_ratio < 0.3:
+                return None  # Doji / indecisive
+
+        # Syarat 6: Lower wick tidak boleh terlalu panjang (rejection sign)
+        lower_wick = min(m15_open, m15_close) - m15_low
+        if m15_range > 0:
+            lower_wick_ratio = lower_wick / m15_range
+            if lower_wick_ratio > 0.35:
+                return None  # Lower wick panjang = buyer defend
+
+        # Syarat 7: Volume M15 harus ada
+        m15_vol_sma = calc_volume_sma(df_m15, 20)
+        m15_vol = df_m15['volume'].iloc[-1]
+        m15_vol_avg = m15_vol_sma.iloc[-1] if not pd.isna(m15_vol_sma.iloc[-1]) else 0
+        if m15_vol_avg > 0 and m15_vol < m15_vol_avg * 0.4:
+            return None  # Volume terlalu rendah
+
+        # Syarat 8: No pump candle di HTF
+        if is_pump_candle(df_htf, atr_htf):
+            return None
+
+        # ═══════════════════════════════════════════════════════
+        # PHASE 3: SIGNAL SHORT — SL/TP dengan RR 1:1.3
+        # ═══════════════════════════════════════════════════════
+
+        entry_price = m15_close  # Entry di harga close M15
+        current_atr = atr_htf.iloc[-1] if not pd.isna(atr_htf.iloc[-1]) else entry_price * 0.02
+
+        atr_mult = ATR_SL_MULT.get(timeframe, ATR_SL_MULT_DEFAULT)
+        atr_sl_distance = current_atr * atr_mult
+
+        # SL: di ATAS trendline
+        trendline_sl = trendline_price * (1 + SL_BUFFER_PCT / 100)
+        sl_price = min(trendline_sl, entry_price + atr_sl_distance)
+
+        # Floor: SL MINIMUM 2.5% dari entry (anti-wick noise koin low-ATR)
+        min_sl_floor = entry_price * (MIN_SL_PCT / 100.0)
+        if (sl_price - entry_price) < min_sl_floor:
+            sl_price = entry_price + min_sl_floor
+
+        sl_distance = sl_price - entry_price
+        tp_price = entry_price - (sl_distance * DEFAULT_RR_RATIO)
+
+        # ═══ RR GUARD: Skip jika RR actual < 1.0 ═══
+        tp_distance_short = entry_price - tp_price
+        actual_rr_short = tp_distance_short / sl_distance if sl_distance > 0 else 0
+        if actual_rr_short < 1.0:
+            return None  # ❌ RR terlalu jelek
+
+        sl_pct = ((sl_price - entry_price) / entry_price) * 100
+        tp_pct = ((entry_price - tp_price) / entry_price) * 100
+
+        entry_type = 'BREAKDOWN_SHORT'
+
+        # Confidence
+        _hl_bonus = min(25, max(0, (len(hl_indices) - 2) * 12))
+        _vol_bonus = 10 if (m15_vol_avg > 0 and m15_vol >= m15_vol_avg * 1.5) else 0
+        _body_bonus = 10 if body_ratio >= 0.6 else 5
+        _precision_bonus = 10  # Bonus karena entry di sweet spot 0.20-0.51%
+        _confidence = min(100, 45 + _hl_bonus + _vol_bonus + _body_bonus + _precision_bonus)
+
+        hl_prices = [round(df_htf['low'].iloc[i], 6) for i in hl_indices]
+
+        signal = {
+            'symbol': symbol,
+            'timeframe': timeframe,
+            'direction': 'SHORT',
+            'signal_type': entry_type,
+            'entry_price': round(entry_price, 8),
+            'sl_price': round(sl_price, 8),
+            'tp_price': round(tp_price, 8),
+            'sl_pct': round(sl_pct, 2),
+            'tp_pct': round(tp_pct, 2),
+            'rr_ratio': round(actual_rr_short, 2),
+            'resistance': round(flat_resistance_level, 8) if flat_resistance_level else 0,
+            'support': round(trendline_price, 8),
+            'higher_lows': hl_prices,
+            'hl_touches': len(hl_indices),
+            'flat_resistance': round(flat_resistance_level, 8) if flat_resistance_level else 0,
+            'resistance_retest_count': 0,
+            'trendline_price': round(trendline_price, 8),
+            'trendline_slope': round(slope_per_candle, 8),
+            'total_rise_pct': round(total_hl_range_pct, 1),
+            'volume_ratio': round(m15_vol / m15_vol_avg, 2) if m15_vol_avg > 0 else 1.0,
+            'vol_at_support_score': 0,
+            'compression_pct': 0,
+            'atr': round(current_atr, 8),
+            'atr_pct': round((current_atr / entry_price) * 100, 2),
+            'confidence': _confidence,
+            'breakdown_distance_pct': round(body_below_trendline_pct, 3),
+            'm15_entry': True,
+        }
+
+        log.info(f"🔻 [{entry_type}]: {symbol} {timeframe}→M15 | "
+                 f"Entry={entry_price:.6f} SL={sl_price:.6f} ({sl_pct:.1f}%) "
+                 f"TP={tp_price:.6f} ({tp_pct:.1f}%) | "
+                 f"HL={len(hl_indices)} Trendline={trendline_price:.6f} "
+                 f"M15 Body↓{body_below_trendline_pct:.3f}%")
+
+        return signal
+
+    except Exception as e:
+        log.error(f"Breakdown strategy error for {symbol} {timeframe}: {e}")
         return None
 
 
@@ -1083,6 +1550,13 @@ def analyze_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dic
         if (entry_price - tp_price) > max_tp_dist:
             tp_price = entry_price - max_tp_dist
 
+        # ═══ RR GUARD: Skip jika RR actual < 1.0 ═══
+        tp_dist_desc = entry_price - tp_price
+        sl_dist_desc = sl_price - entry_price
+        actual_rr_desc = tp_dist_desc / sl_dist_desc if sl_dist_desc > 0 else 0
+        if actual_rr_desc < 1.0:
+            return None  # ❌ RR terlalu jelek
+
         sl_pct = ((sl_price - entry_price) / entry_price) * 100
         tp_pct = ((entry_price - tp_price) / entry_price) * 100
 
@@ -1105,7 +1579,7 @@ def analyze_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dic
             'tp_price':             round(tp_price, 8),
             'sl_pct':               round(sl_pct, 2),
             'tp_pct':               round(tp_pct, 2),
-            'rr_ratio':             round(DEFAULT_RR_RATIO, 1),
+            'rr_ratio':             round(actual_rr_desc, 2),
             'flat_support':         round(flat_support_level, 8),
             'lower_highs':          lh_prices,
             'lh_touches':           len(lh_indices),
@@ -1140,38 +1614,44 @@ def analyze_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dic
 def _calc_trendline_value(df: pd.DataFrame, hl_indices: List[int]) -> Optional[float]:
     """
     Calculate the expected trendline price at the current candle
-    by linearly extrapolating the last 2 higher lows (using fractal body prices).
+    by drawing a straight line from the FIRST Higher Low to the
+    LAST Higher Low, using actual LOW prices.
     
-    [FIX #6] Proyeksi dibatasi maks 10 candle dari HL terakhir.
-    Proyeksi terlalu jauh menghasilkan nilai yang tidak akurat dan menyesatkan.
+    Ini menghasilkan trendline yang SELALU di bawah candle (support),
+    ditarik dari HL pertama sampai HL terakhir — persis seperti trader
+    menggambar garis support ascending triangle di TradingView.
     """
     if len(hl_indices) < 2:
         return None
 
-    idx1 = hl_indices[-2]
-    idx2 = hl_indices[-1]
-    price1 = min(df['open'].iloc[idx1], df['close'].iloc[idx1])
-    price2 = min(df['open'].iloc[idx2], df['close'].iloc[idx2])
+    # Tarik garis dari HL PERTAMA ke HL TERAKHIR — actual LOW
+    idx1 = hl_indices[0]   # HL pertama (awal trendline)
+    idx2 = hl_indices[-1]  # HL terakhir (ujung trendline)
 
-    if idx2 == idx1:
-        return price2
+    low1 = float(df['low'].iloc[idx1])
+    low2 = float(df['low'].iloc[idx2])
 
-    slope = (price2 - price1) / (idx2 - idx1)
+    # Hitung slope garis lurus: (y2-y1) / (x2-x1)
+    dx = idx2 - idx1
+    if dx == 0:
+        return None
+    slope = (low2 - low1) / dx
+
     current_idx = len(df) - 1
     candles_since_last_hl = current_idx - idx2
 
-    # Batasi proyeksi maks 15 candle dari HL terakhir
-    # H4: ~2.5 hari, H1: ~15 jam — cukup untuk pullback, tidak over-extrapolate
-    if candles_since_last_hl > 15:
+    # Batasi proyeksi maks 40 candle dari HL terakhir
+    if candles_since_last_hl > 40:
         return None
 
-    trendline_at_now = price2 + slope * candles_since_last_hl
+    # Proyeksikan garis dari HL pertama ke candle sekarang
+    trendline_at_now = low1 + slope * (current_idx - idx1)
 
     # Trendline must be positive and slope must be upward
     if trendline_at_now <= 0 or slope < 0:
         return None
 
-    return trendline_at_now
+    return float(trendline_at_now)
 
 
 def _is_volume_rising(df: pd.DataFrame, lookback: int = 5) -> bool:
@@ -1412,55 +1892,95 @@ def is_volume_confirmed(df: pd.DataFrame, lookback: int = 20) -> bool:
 
 def detect_lower_highs(df: pd.DataFrame, p_highs: List[int]) -> Tuple[bool, List[int]]:
     """
-    Detect Lower Highs pattern — mirror of Higher Lows.
-    Each pivot high must be LOWER than the previous one.
+    Detect Lower Highs pattern — STRICT v2.
+    Mirror kualitas dari detect_higher_lows:
+    - Setiap pivot high harus LEBIH RENDAH dari sebelumnya
+    - Gap antar LH: minimal MIN_HL_CANDLE_GAP, maksimal MAX_HL_CANDLE_GAP
+    - Price jump antar LH tidak boleh > MAX_HL_PRICE_JUMP_PCT (outlier filter)
+    - Pilih BEST sequence dari semua kemungkinan starting point
     """
     if len(p_highs) < MIN_HL_TOUCHES:
         return False, []
 
-    lh_indices = [p_highs[0]]
-    for i in range(1, len(p_highs)):
-        curr_high = df['high'].iloc[p_highs[i]]
-        prev_high = df['high'].iloc[lh_indices[-1]]
-        gap = p_highs[i] - lh_indices[-1]
+    best_seq = []
 
-        if curr_high < prev_high and gap >= MIN_HL_CANDLE_GAP:
-            lh_indices.append(p_highs[i])
+    # Coba setiap pivot sebagai starting point, pilih sequence terpanjang
+    for start in range(len(p_highs)):
+        seq = [p_highs[start]]
+        for i in range(start + 1, len(p_highs)):
+            curr_high = float(df['high'].iloc[p_highs[i]])
+            prev_high = float(df['high'].iloc[seq[-1]])
+            gap = p_highs[i] - seq[-1]
 
-    if len(lh_indices) < MIN_HL_TOUCHES:
+            # Must be lower
+            if curr_high >= prev_high:
+                continue
+
+            # Gap filter: tidak terlalu dekat, tidak terlalu jauh
+            if gap < MIN_HL_CANDLE_GAP or gap > MAX_HL_CANDLE_GAP:
+                continue
+
+            # Outlier filter: lonjakan harga antar LH tidak boleh terlalu besar
+            drop_pct = ((prev_high - curr_high) / prev_high) * 100
+            if drop_pct > MAX_HL_PRICE_JUMP_PCT:
+                continue
+
+            seq.append(p_highs[i])
+
+        if len(seq) > len(best_seq):
+            best_seq = seq
+
+    if len(best_seq) < MIN_HL_TOUCHES:
         return False, []
-    if len(lh_indices) > MAX_HL_TOUCHES:
-        lh_indices = lh_indices[-MAX_HL_TOUCHES:]
 
-    return True, lh_indices
+    # Recency check: LH terakhir harus dalam 80 candle terakhir
+    if best_seq[-1] < len(df) - 80:
+        return False, []
+
+    if len(best_seq) > MAX_HL_TOUCHES:
+        best_seq = best_seq[-MAX_HL_TOUCHES:]
+
+    return True, best_seq
 
 
 def _calc_resistance_trendline(df: pd.DataFrame, lh_indices: List[int]) -> Optional[float]:
-    """Calculate resistance trendline from Lower Highs (for short entries)."""
+    """
+    Calculate resistance trendline from Lower Highs (for short entries)
+    using LINEAR REGRESSION through ALL LH points.
+
+    Sama seperti fix _calc_trendline_value untuk LONG —
+    regression menghasilkan garis yang lebih akurat dan stabil
+    dibanding hanya 2 titik.
+    """
     if len(lh_indices) < 2:
         return None
 
-    idx1 = lh_indices[-2]
-    idx2 = lh_indices[-1]
-    price1 = df['high'].iloc[idx1]
-    price2 = df['high'].iloc[idx2]
-
-    if idx2 == idx1:
-        return price2
-
-    slope = (price2 - price1) / (idx2 - idx1)
     current_idx = len(df) - 1
-    candles_since = current_idx - idx2
+    candles_since = current_idx - lh_indices[-1]
 
-    if candles_since > 10:
+    if candles_since > 40:
         return None
 
-    trendline_at_now = price2 + slope * candles_since
+    # Kumpulkan x (index) dan y (high price) dari semua LH
+    x = np.array(lh_indices, dtype=float)
+    y = np.array([float(df['high'].iloc[i]) for i in lh_indices])
 
-    if trendline_at_now <= 0 or slope > 0:  # slope harus negatif untuk downtrend
+    # Linear regression: y = slope * x + intercept
+    coeffs = np.polyfit(x, y, 1)
+    slope = coeffs[0]
+    intercept = coeffs[1]
+
+    # Slope harus negatif untuk downtrend
+    if slope > 0:
         return None
 
-    return trendline_at_now
+    # Proyeksikan ke candle sekarang
+    trendline_at_now = slope * current_idx + intercept
+
+    if trendline_at_now <= 0:
+        return None
+
+    return float(trendline_at_now)
 
 
 def is_bearish_structure(df: pd.DataFrame) -> bool:

@@ -87,7 +87,7 @@ def init_db():
 def open_position(symbol: str, bybit_symbol: str, entry_price: float,
                   qty: float, leverage: int, sl_price: float, tp_price: float,
                   margin_used: float, timeframe: str, alpha_pct: float,
-                  volume_ratio: float, signal_data: str = '') -> int:
+                  volume_ratio: float, signal_data: str = '', side: str = 'Buy') -> int:
     """Record a new open position. Returns position ID."""
     conn = _connect()
     cur = conn.execute("""
@@ -95,21 +95,21 @@ def open_position(symbol: str, bybit_symbol: str, entry_price: float,
             (symbol, bybit_symbol, side, entry_price, qty, leverage,
              sl_price, tp_price, margin_used, status, signal_data,
              timeframe, open_ts, alpha_pct, volume_ratio)
-        VALUES (?, ?, 'Buy', ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?)
-    """, (symbol, bybit_symbol, entry_price, qty, leverage,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?)
+    """, (symbol, bybit_symbol, side, entry_price, qty, leverage,
           sl_price, tp_price, margin_used, signal_data,
           timeframe, datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
           alpha_pct, volume_ratio))
     conn.commit()
     pos_id = cur.lastrowid
     conn.close()
-    log.info(f"DB OPEN #{pos_id}: {bybit_symbol} @ {entry_price:.6f} "
+    log.info(f"DB OPEN #{pos_id}: {bybit_symbol} {side} @ {entry_price:.6f} "
              f"qty={qty} lev={leverage}x SL={sl_price:.6f} TP={tp_price:.6f}")
     return pos_id
 
 
 def close_position(pos_id: int, exit_price: float, reason: str) -> Optional[Dict]:
-    """Close a position and calculate PnL. Returns position dict."""
+    """Close a position and calculate PnL. Supports LONG and SHORT."""
     conn = _connect()
     row = conn.execute("SELECT * FROM positions WHERE id=? AND status='OPEN'",
                        (pos_id,)).fetchone()
@@ -120,10 +120,15 @@ def close_position(pos_id: int, exit_price: float, reason: str) -> Optional[Dict
     entry = row['entry_price']
     qty = row['qty']
     leverage = row['leverage']
+    side = row['side']  # 'Buy' = LONG, 'Sell' = SHORT
 
-    # PnL calculation for LONG
-    pnl = (exit_price - entry) * qty
-    pnl_pct = ((exit_price - entry) / entry) * 100 * leverage  # leveraged PnL%
+    # PnL calculation — direction-aware
+    if side == 'Sell':  # SHORT: profit when exit < entry
+        pnl = (entry - exit_price) * qty
+        pnl_pct = ((entry - exit_price) / entry) * 100 * leverage
+    else:  # LONG: profit when exit > entry
+        pnl = (exit_price - entry) * qty
+        pnl_pct = ((exit_price - entry) / entry) * 100 * leverage
 
     conn.execute("""
         UPDATE positions SET
@@ -142,7 +147,7 @@ def close_position(pos_id: int, exit_price: float, reason: str) -> Optional[Dict
     conn.close()
 
     emoji = '✅' if pnl >= 0 else '❌'
-    log.info(f"DB CLOSE #{pos_id} {emoji}: {row['bybit_symbol']} "
+    log.info(f"DB CLOSE #{pos_id} {emoji}: {row['bybit_symbol']} {side} "
              f"entry={entry:.6f} exit={exit_price:.6f} "
              f"PnL=${pnl:.4f} ({pnl_pct:+.2f}%) reason={reason}")
     return result
@@ -169,10 +174,21 @@ def get_open_symbols() -> set:
 
 
 def count_open() -> int:
-    """Count open positions."""
+    """Count all open positions."""
     conn = _connect()
     row = conn.execute(
         "SELECT COUNT(*) as cnt FROM positions WHERE status='OPEN'"
+    ).fetchone()
+    conn.close()
+    return row['cnt']
+
+
+def count_open_by_side(side: str) -> int:
+    """Count open positions by side ('Buy' for LONG, 'Sell' for SHORT)."""
+    conn = _connect()
+    row = conn.execute(
+        "SELECT COUNT(*) as cnt FROM positions WHERE status='OPEN' AND side=?",
+        (side,)
     ).fetchone()
     conn.close()
     return row['cnt']

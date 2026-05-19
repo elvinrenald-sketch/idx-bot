@@ -20,7 +20,7 @@ TG_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
 # ══════════════════════════════════════════════════════════════
 # STRATEGY — Price Action Parameters
 # ══════════════════════════════════════════════════════════════
-TIMEFRAMES          = ['1h', '4h']                # Scan pada H1 dan H4 saja (tidak M15)
+TIMEFRAMES          = ['1h']                      # Hanya H1 untuk LONG entry (M15 SHORT tetap aktif terpisah)
 PRIMARY_TIMEFRAME   = '1h'                        # Timeframe utama untuk entry
 CANDLE_LOOKBACK     = 150                         # Jumlah candle yang diambil
 
@@ -31,12 +31,12 @@ PIVOT_RIGHT    = 3     # [Tuned] Turunkan ke 3 agar entry lebih cepat tanpa meng
 
 # Higher Low
 MIN_HL_TOUCHES    = 2   # Minimal 2 higher low touches pada trendline
-MAX_HL_TOUCHES    = 4   # Maksimal 4 touches (lebih dari ini = stale pattern)
+MAX_HL_TOUCHES    = 5   # Maksimal 5 touches (pattern yang mature tetap valid)
 MIN_HL_CANDLE_GAP = 3   # [Tuned] Jarak minimal antar HL agar bisa menangkap tren agresif
-MAX_HL_CANDLE_GAP = 40  # [NEW] Jarak MAKSIMAL antar HL berurutan (candle). >40 = HL terlalu jauh, bukan tren kohesif
-MAX_HL_PRICE_JUMP_PCT = 15.0  # [FIX] Crypto altcoins swing 10-15% between lows normally
+MAX_HL_CANDLE_GAP = 55  # [TUNED] Jarak MAKSIMAL antar HL berurutan (candle). Ascending triangle butuh waktu bentuk
+MAX_HL_PRICE_JUMP_PCT = 25.0  # [TUNED] Crypto altcoins swing 15-25% between pivot lows normally
 MIN_ASCENDING_RANGE_PCT = 1.0  # [NEW] Minimum jarak total HL pertama ke terakhir (%). <1% = bukan ascending, cuma noise
-MAX_RESISTANCE_RETEST = 4  # Maksimal 4x retest resistance untuk boleh entry
+MAX_RESISTANCE_RETEST = 7  # Maksimal 7x retest resistance (crypto lebih sering retest)
 
 # Accumulation Zone
 ACCUM_MIN_CANDLES   = 6      # Minimal 6 candle dalam zona akumulasi
@@ -48,7 +48,7 @@ BREAKOUT_CLOSE_ABOVE = True  # Candle harus CLOSE di atas resistance
 
 
 # Trendline / Pullback Entry
-TRENDLINE_TOLERANCE_PCT = 1.2  # [FIX] Harga harus dalam 1.2% dari trendline HL (ketat)
+TRENDLINE_TOLERANCE_PCT = 0.51  # [TUNED] Entry hanya jika harga dalam <0.51% dari trendline HL support
 DEMAND_TOLERANCE_PCT    = 1.5  # Harga harus dalam 1.5% dari demand zone
 
 # Pucuk Protector (H4/D1) — [FIX v3] Lebih ketat
@@ -86,7 +86,8 @@ TRIPLE_SCREEN_ENABLED  = True  # Align M15 with H1 & H4 trends
 # RISK MANAGEMENT
 # ══════════════════════════════════════════════════════════════
 RISK_PER_TRADE_PCT = 3.0     # Risiko 3% equity per trade
-MAX_OPEN_POSITIONS = 3       # Maksimal 3 posisi terbuka
+MAX_OPEN_POSITIONS = 3       # Maksimal 3 posisi LONG terbuka
+MAX_SHORT_POSITIONS = 3      # Maksimal 3 posisi SHORT terbuka
 MIN_EQUITY_FOR_TRADE = 5.5   # [NEW] Minimum equity $5.5 USDT untuk boleh trade. Jika di bawah = SKIP scan
 FAILED_SYMBOL_COOLDOWN = 10  # [NEW] Cooldown: skip simbol yang gagal selama 10 scan (~10 menit)
 MIN_LEVERAGE       = 3       # Leverage minimum
@@ -98,6 +99,7 @@ TRAILING_BREAKEVEN = True    # Geser SL otomatis
 
 # SL Buffer
 SL_BUFFER_PCT      = 0.3     # Tambahan 0.3% di bawah support zone untuk SL
+MIN_SL_PCT         = 2.5     # MINIMUM SL jarak 2.5% dari entry (anti-wick noise)
 
 # ATR Multiplier per Timeframe
 # RR tetap 1:2 di semua TF, hanya ukuran absolut SL/TP yang menyesuaikan "napas" TF
@@ -112,14 +114,15 @@ ATR_SL_MULT_DEFAULT = 1.5  # Fallback jika TF tidak dikenali
 # ══════════════════════════════════════════════════════════════
 # MARKET FILTERS
 # ══════════════════════════════════════════════════════════════
-MIN_VOLUME_24H     = 10_000_000   # Volume 24h minimal $10M (likuid, bukan micro cap)
+MIN_VOLUME_24H     = 600_000      # Volume 24h minimal $600K (scan lebih banyak koin)
 MAX_VOLUME_24H     = 250_000_000  # Volume 24h max $250M (skip mega cap BTC/ETH/SOL)
 MAX_SPREAD_PCT     = 0.15      # Spread max 0.15%
 MIN_PRICE          = 0.0001    # Harga minimum (filter dust coins)
 MIN_NOTIONAL_USDT  = 5.5       # Bybit minimum order $5 USDT (tambah buffer 10%)
-BLACKLIST_SYMBOLS  = [         # Koin yang di-skip (stablecoins, delisted)
+BLACKLIST_SYMBOLS  = [         # Koin yang di-skip (stablecoins, delisted, commodity)
     'USDC/USDT:USDT', 'DAI/USDT:USDT', 'TUSD/USDT:USDT',
     'BUSD/USDT:USDT', 'FDUSD/USDT:USDT',
+    'CL/USDT:USDT',              # Crude Oil — commodity, butuh Terms agreement khusus
 ]
 
 # ══════════════════════════════════════════════════════════════
@@ -128,7 +131,7 @@ BLACKLIST_SYMBOLS  = [         # Koin yang di-skip (stablecoins, delisted)
 SCAN_INTERVAL_SEC     = 60     # Scan setiap 1 menit (Real-time momentum)
 POSITION_CHECK_SEC    = 60     # Cek posisi setiap 1 menit
 MAX_ALPHA_COINS       = 30     # Max koin alpha yang di-deep scan
-RATE_LIMIT_DELAY      = 0.15   # Delay antar API call (150ms) untuk hindari rate limit
+RATE_LIMIT_DELAY      = 0.35   # Delay antar API call (350ms) untuk hindari rate limit
 
 # Market Cap Filter (CoinGecko)
 MARKETCAP_TOP_N       = 100    # Hanya exclude top 100 (scan koin rank 101+)

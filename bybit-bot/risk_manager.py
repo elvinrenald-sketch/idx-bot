@@ -55,22 +55,34 @@ def calculate_position_size(
     leverage: int,
     min_qty: float,
     qty_step: float,
+    direction: str = 'LONG',
 ) -> Optional[Dict]:
     """
     Calculate position size based on fixed risk percentage.
+    Supports both LONG and SHORT directions.
 
     Formula:
     1. risk_amount = equity × RISK_PER_TRADE_PCT / 100
-    2. sl_distance_pct = (entry - sl) / entry
+    2. sl_distance_pct = abs(entry - sl) / entry
     3. position_value = risk_amount / sl_distance_pct
     4. qty = position_value / entry_price
     5. margin_required = position_value / leverage
 
     Returns sizing dict or None if impossible.
     """
-    if entry_price <= 0 or sl_price <= 0 or sl_price >= entry_price:
+    if entry_price <= 0 or sl_price <= 0:
         log.warning(f"Invalid prices: entry={entry_price} sl={sl_price}")
         return None
+
+    # Validate SL direction
+    if direction == 'SHORT':
+        if sl_price <= entry_price:
+            log.warning(f"Invalid SHORT prices: SL={sl_price} must be > entry={entry_price}")
+            return None
+    else:
+        if sl_price >= entry_price:
+            log.warning(f"Invalid LONG prices: SL={sl_price} must be < entry={entry_price}")
+            return None
 
     if equity <= 0:
         log.warning("Zero equity, cannot size position")
@@ -79,8 +91,8 @@ def calculate_position_size(
     # Step 1: How much we're willing to lose
     risk_amount = equity * (RISK_PER_TRADE_PCT / 100.0)
 
-    # Step 2: SL distance as percentage
-    sl_distance_pct = (entry_price - sl_price) / entry_price
+    # Step 2: SL distance as percentage (always positive)
+    sl_distance_pct = abs(entry_price - sl_price) / entry_price
 
     if sl_distance_pct <= 0:
         return None
@@ -194,6 +206,43 @@ def calculate_trailing_sl(entry_price: float, current_price: float,
     # Only move SL up, never down
     if new_sl > current_sl:
         log.info(f"📈 TRAILING SL: {current_sl:.6f} → {new_sl:.6f} "
+                 f"(profit={profit_in_r:.1f}R)")
+        return round(new_sl, 8)
+
+    return None
+
+
+def calculate_trailing_sl_short(entry_price: float, current_price: float,
+                                original_sl: float, current_sl: float) -> Optional[float]:
+    """
+    Trailing stop for SHORT: move SL DOWN after profit >= threshold.
+
+    1R = original_sl - entry (the original risk distance, SL above entry)
+    When price drops to entry - 1R, move SL to entry (breakeven).
+    When price drops to entry - 2R, move SL to entry - 1R.
+    """
+    r_distance = original_sl - entry_price  # 1R distance (positive, SL above entry)
+    if r_distance <= 0:
+        return None
+
+    # For SHORT, profit = price DROP from entry
+    profit_in_r = (entry_price - current_price) / r_distance
+
+    if profit_in_r >= 1.2:
+        # At 1.2R profit, trail SL to entry - 0.5R (lock 0.5R profit)
+        new_sl = entry_price - (r_distance * 0.5)
+    elif profit_in_r >= 0.8:
+        # At 0.8R profit, move SL to breakeven (entry)
+        new_sl = entry_price - (entry_price * 0.001)  # Tiny buffer below entry
+    elif profit_in_r >= 0.5:
+        # At 0.5R profit, move SL down to reduce risk to 0.3R
+        new_sl = entry_price + (r_distance * 0.3)
+    else:
+        return None  # Not enough profit to trail
+
+    # Only move SL DOWN, never up (for SHORT)
+    if new_sl < current_sl:
+        log.info(f"📉 TRAILING SL SHORT: {current_sl:.6f} → {new_sl:.6f} "
                  f"(profit={profit_in_r:.1f}R)")
         return round(new_sl, 8)
 

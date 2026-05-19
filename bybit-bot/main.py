@@ -2,8 +2,14 @@
 Bybit Crypto Algo Bot — Main Orchestrator
 Ties together: Scanner → Strategy → Risk → Executor → DB → Telegram → Dashboard
 """
+# Load .env BEFORE anything reads os.environ
+from dotenv import load_dotenv
+load_dotenv()
 import os
 import sys
+import gc
+import signal
+import subprocess
 import json
 import time
 import asyncio
@@ -22,7 +28,7 @@ import uvicorn
 from config import (
     BYBIT_API_KEY, BYBIT_API_SECRET, TG_TOKEN, TG_CHAT_ID,
     TIMEFRAMES, PRIMARY_TIMEFRAME, SCAN_INTERVAL_SEC,
-    POSITION_CHECK_SEC, MAX_OPEN_POSITIONS, DATA_DIR, WEB_PORT,
+    POSITION_CHECK_SEC, MAX_OPEN_POSITIONS, MAX_SHORT_POSITIONS, DATA_DIR, WEB_PORT,
     BYBIT_TESTNET, ACCUM_MAX_RANGE_PCT, VOLUME_BREAKOUT_MULT,
     SL_BUFFER_PCT, DEFAULT_RR_RATIO, TRIPLE_SCREEN_ENABLED,
     MAX_ALPHA_COINS, MARKETCAP_TOP_N, MARKETCAP_CACHE_SEC,
@@ -31,8 +37,8 @@ from config import (
 )
 import db
 from scanner import MarketScanner
-from strategy import analyze, diagnose_analyze, is_pucuk, is_pump_candle, calc_atr, is_bullish_structure
-from risk_manager import calculate_leverage, calculate_position_size, calculate_trailing_sl
+from strategy import analyze, analyze_breakdown_short, analyze_lh_short, diagnose_analyze, is_pucuk, is_pump_candle, calc_atr, is_bullish_structure
+from risk_manager import calculate_leverage, calculate_position_size, calculate_trailing_sl, calculate_trailing_sl_short
 from executor import BybitExecutor
 
 # ══════════════════════════════════════════════════════════════
@@ -45,8 +51,7 @@ logging.basicConfig(
     format='%(asctime)s [%(name)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(os.path.join(DATA_DIR, 'bot.log'), encoding='utf-8'),
+        logging.StreamHandler(sys.stdout),  # Fly.io captures stdout — no file needed
     ]
 )
 log = logging.getLogger('main')
@@ -71,45 +76,161 @@ class WebState:
 WEB = WebState()
 
 # ══════════════════════════════════════════════════════════════
-# TELEGRAM — Auto-detect Chat ID
+# TELEGRAM — Auto-detect Chat ID + Manual Bias Control
 # ══════════════════════════════════════════════════════════════
 _active_chat_id: str = TG_CHAT_ID  # Start from env var, update dynamically
 _tg_offset: int = 0
+_manual_bias: str = ''  # '' = AUTO (use EMA), 'LONG' or 'SHORT' = manual override
 
 
-async def tg_poll_chat_id(session: aiohttp.ClientSession):
-    """Poll Telegram getUpdates to auto-detect chat ID.
-    Runs when TG_CHAT_ID env var is empty.
-    Once detected, saves it and stops polling.
+async def tg_poll_updates(session: aiohttp.ClientSession):
+    """Poll Telegram getUpdates to:
+    1. Auto-detect chat ID (if not set)
+    2. Handle /bias, /mode, /direction commands → send inline keyboard
+    3. Handle inline keyboard button presses (callback_query)
     """
-    global _active_chat_id, _tg_offset
-    if _active_chat_id:
-        return  # Already have chat_id
+    global _active_chat_id, _tg_offset, _manual_bias
     if not TG_TOKEN:
         return
     try:
         url = f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates"
-        resp = await session.get(url, params={'offset': _tg_offset, 'timeout': 1},
-                                  timeout=aiohttp.ClientTimeout(total=5))
+        params = {'offset': _tg_offset, 'timeout': 2, 'allowed_updates': '["message","callback_query"]'}
+        resp = await session.get(url, params=params,
+                                  timeout=aiohttp.ClientTimeout(total=10))
         data = await resp.json()
-        if data.get('ok') and data.get('result'):
-            for update in data['result']:
-                _tg_offset = update['update_id'] + 1
-                msg = update.get('message') or update.get('channel_post', {})
-                chat = msg.get('chat', {})
-                chat_id = str(chat.get('id', ''))
-                if chat_id:
-                    _active_chat_id = chat_id
-                    log.info(f"✅ Telegram Chat ID detected: {chat_id} "
-                             f"({chat.get('first_name', '')} {chat.get('username', '')})")
-                    await tg_send_raw(session, chat_id,
-                        f"✅ <b>Bybit Alpha Bot Connected!</b>\n"
-                        f"💰 Equity: ${WEB.equity:.2f}\n"
-                        f"🤖 Bot terhubung dan siap trading!"
-                    )
-                    break
+        if not data.get('ok'):
+            log.warning(f"TG getUpdates API error: {data}")
+            return
+        results = data.get('result', [])
+        if not results:
+            return
+
+        for update in results:
+            _tg_offset = update['update_id'] + 1
+
+            # ── Handle callback_query (inline button press) ──
+            cbq = update.get('callback_query')
+            if cbq:
+                try:
+                    cb_data = cbq.get('data', '')
+                    cb_msg = cbq.get('message', {})
+                    cb_chat = cb_msg.get('chat', {})
+                    cb_chat_id = str(cb_chat.get('id', ''))
+                    cb_id = cbq.get('id', '')
+
+                    if cb_data in ('bias_long', 'bias_short', 'bias_auto') and cb_chat_id:
+                        if cb_data == 'bias_long':
+                            _manual_bias = 'LONG'
+                            reply = (
+                                '✅ <b>Mode: 📈 LONG ONLY</b>\n\n'
+                                '🔍 Bot AKTIF mencari posisi LONG:\n'
+                                '• Ascending Triangle (HL bounce)\n'
+                                '• Entry di trendline support\n\n'
+                                '⛔ Bot TIDAK akan cari SHORT\n'
+                                '📊 BTC EMA diabaikan\n\n'
+                                'Cek log: <code>Mode:LONG(📲MANUAL)</code>'
+                            )
+                        elif cb_data == 'bias_short':
+                            _manual_bias = 'SHORT'
+                            reply = (
+                                '✅ <b>Mode: 📉 SHORT ONLY</b>\n\n'
+                                '🔍 Bot AKTIF mencari posisi SHORT:\n'
+                                '• LH Rejection (H1 resistance)\n'
+                                '• Breakdown Short (M15)\n\n'
+                                '⛔ Bot TIDAK akan cari LONG\n'
+                                '📊 BTC EMA diabaikan\n\n'
+                                'Cek log: <code>Mode:SHORT(📲MANUAL)</code>'
+                            )
+                        else:
+                            _manual_bias = ''
+                            reply = (
+                                '✅ <b>Mode: 🤖 AUTO (BTC 13 EMA)</b>\n\n'
+                                '🔍 Bot otomatis pilih arah:\n'
+                                '• BTC > 13 EMA → cari LONG\n'
+                                '• BTC < 13 EMA → cari SHORT\n\n'
+                                'Cek log: <code>Mode:LONG/SHORT(📊EMA)</code>'
+                            )
+
+                        log.info(f"📲 Telegram bias override: {cb_data} → _manual_bias='{_manual_bias}'")
+                        await tg_send_raw(session, cb_chat_id, reply)
+
+                    # Answer callback to remove loading spinner
+                    if cb_id:
+                        ans_url = f"https://api.telegram.org/bot{TG_TOKEN}/answerCallbackQuery"
+                        await session.post(ans_url, json={'callback_query_id': cb_id},
+                                           timeout=aiohttp.ClientTimeout(total=5))
+                except Exception as e:
+                    log.warning(f"TG callback error: {e}")
+                continue
+
+            # ── Handle text messages ──
+            msg = update.get('message') or update.get('channel_post')
+            if not msg:
+                continue
+            chat = msg.get('chat', {})
+            chat_id = str(chat.get('id', ''))
+            text = (msg.get('text') or '').strip().lower()
+
+            if not chat_id:
+                continue
+
+            # Auto-detect chat ID
+            if not _active_chat_id:
+                _active_chat_id = chat_id
+                log.info(f"✅ Telegram Chat ID detected: {chat_id} "
+                         f"({chat.get('first_name', '')} {chat.get('username', '')})")
+                await tg_send_raw(session, chat_id,
+                    f"✅ <b>Bybit Alpha Bot Connected!</b>\n"
+                    f"💰 Equity: ${WEB.equity:.2f}\n"
+                    f"🤖 Bot terhubung dan siap trading!\n\n"
+                    f"Ketik /bias untuk pilih mode LONG/SHORT/AUTO"
+                )
+
+            # Handle /bias /mode /direction → send inline keyboard
+            if text in ('/bias', '/mode', '/direction', '/start'):
+                await tg_send_bias_keyboard(session, chat_id)
+
     except Exception as e:
-        log.debug(f"TG poll error: {e}")
+        log.warning(f"TG poll error: {e}")
+
+
+async def tg_send_bias_keyboard(session: aiohttp.ClientSession, chat_id: str):
+    """Send inline keyboard with LONG / SHORT / AUTO buttons."""
+    if not TG_TOKEN or not chat_id:
+        return
+    current = _manual_bias if _manual_bias else 'AUTO (EMA)'
+    try:
+        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+        payload = {
+            'chat_id': chat_id,
+            'text': (
+                f'🎯 <b>Pilih Mode Trading</b>\n\n'
+                f'Mode saat ini: <b>{current}</b>\n\n'
+                f'📈 LONG = bot hanya cari posisi LONG\n'
+                f'📉 SHORT = bot hanya cari posisi SHORT\n'
+                f'🤖 AUTO = otomatis dari BTC 13 EMA Daily'
+            ),
+            'parse_mode': 'HTML',
+            'reply_markup': json.dumps({
+                'inline_keyboard': [
+                    [
+                        {'text': '📈 LONG', 'callback_data': 'bias_long'},
+                        {'text': '📉 SHORT', 'callback_data': 'bias_short'},
+                    ],
+                    [
+                        {'text': '🤖 AUTO (EMA)', 'callback_data': 'bias_auto'},
+                    ]
+                ]
+            }),
+        }
+        resp = await session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10))
+        resp_data = await resp.json()
+        if not resp_data.get('ok'):
+            log.warning(f"TG bias keyboard send failed: {resp_data}")
+        else:
+            log.info(f"📲 Bias keyboard sent to {chat_id}")
+    except Exception as e:
+        log.error(f"TG bias keyboard error: {e}")
 
 
 async def tg_send_raw(session: aiohttp.ClientSession, chat_id: str, text: str):
@@ -264,14 +385,29 @@ async def sync_positions_from_bybit(executor: BybitExecutor, session):
         log.error(f"Position sync error: {e}")
 
 
+async def tg_poll_loop(session: aiohttp.ClientSession):
+    """Background loop: poll Telegram every 2 seconds for instant command response."""
+    log.info("📲 Telegram poll loop started (every 2s)")
+    while True:
+        try:
+            await tg_poll_updates(session)
+        except Exception as e:
+            log.warning(f"TG poll loop error: {e}")
+        await asyncio.sleep(2)
+
+
 async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
     """Main scanning loop — runs every SCAN_INTERVAL_SEC."""
     log.info("🚀 Scan loop started")
     already_traded = set()  # Symbols traded this session
     already_traded_reset_scan = 0  # Reset counter
     failed_symbols = {}  # {symbol: scans_remaining} — cooldown after failed order
+    retry_queue = {}  # {symbol: {retries: N, coin: {...}}} — coins whose data fetch timed out
 
     async with aiohttp.ClientSession() as session:
+        # ── Launch Telegram polling as background task (instant response) ──
+        asyncio.create_task(tg_poll_loop(session))
+
         # Startup notification
         equity = await asyncio.to_thread(executor.get_equity)
         await tg_send(session,
@@ -279,7 +415,9 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
             f"💰 Equity: ${equity:.2f}\n"
             f"⚙️ Testnet: {BYBIT_TESTNET}\n"
             f"📊 Timeframes: {', '.join(TIMEFRAMES)}\n"
-            f"🎯 Strategy: Kalimasada v6 Ascending Triangle (LONG)\n"
+            f"🎯 Strategy: Kalimasada v7 (BTC 13EMA Filter)\n"
+            f"📈 LONG: Ascending Triangle (BTC > 13EMA)\n"
+            f"📉 SHORT: LH Rejection + Breakdown (BTC < 13EMA)\n"
             f"📅 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
         )
 
@@ -294,9 +432,6 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
             try:
                 t0 = time.time()
                 WEB.status = 'SCANNING'
-
-                # ── Poll Telegram chat ID (until found) ────────
-                await tg_poll_chat_id(session)
 
                 # ── Reset already_traded every ~4 hours (240 scans at 60s) ──
                 already_traded_reset_scan += 1
@@ -320,26 +455,54 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                     await asyncio.sleep(60)
                     continue
 
-                # ── Step 2: Check how many slots available ──────
+                # ── Step 2: Check how many slots available per direction ──────
                 open_count = db.count_open()
-                slots = MAX_OPEN_POSITIONS - open_count
+                long_count = db.count_open_by_side('Buy')
+                short_count = db.count_open_by_side('Sell')
+                slots = MAX_OPEN_POSITIONS - long_count  # LONG slots
+                short_slots = MAX_SHORT_POSITIONS - short_count  # SHORT slots
                 open_symbols = db.get_open_symbols()
 
-                # ── Step 3: ALWAYS scan top coins for watchlist ──────
+                 # ── Step 3: ALWAYS scan top coins for watchlist ──────
                 all_coins = await asyncio.to_thread(scanner.scan_top_volume)
-                WEB.alpha_coins = all_coins
+                WEB.alpha_coins = all_coins[:30]  # Cap at 30 to save memory
+
+                # ── Step 3.5: Determine trade bias (manual override or BTC 13 EMA) ──
+                if _manual_bias:
+                    btc_bias = _manual_bias
+                    bias_source = 'MANUAL'
+                    log.info(f"📲 BIAS={btc_bias} [MANUAL override from Telegram]")
+                else:
+                    btc_bias = await asyncio.to_thread(scanner.fetch_btc_trend_bias)
+                    bias_source = 'EMA'
 
                 if equity < MIN_EQUITY_FOR_TRADE:
                     log.warning(f"Equity ${equity:.2f} < min ${MIN_EQUITY_FOR_TRADE}. Skipping trade scan.")
                     WEB.status = 'LOW_EQUITY'
-                elif slots <= 0:
-                    log.info(f"Max positions ({MAX_OPEN_POSITIONS}) reached. Monitoring only.")
+                elif (btc_bias == 'LONG' and slots <= 0) or (btc_bias == 'SHORT' and short_slots <= 0):
+                    log.info(f"Max positions reached (LONG:{long_count}/{MAX_OPEN_POSITIONS} SHORT:{short_count}/{MAX_SHORT_POSITIONS}). Monitoring only.")
                     WEB.status = 'MAX_POSITIONS'
                 else:
 
-                    # ── Step 4: Pure PA — analyze() ascending triangle ──
+                    # ── Step 4: BTC bias routes LONG or SHORT ──
                     signals = []
-                    for coin in all_coins:
+                    
+                    # Prepend retry_queue coins to scan first (from previous failed fetches)
+                    retry_coins_to_scan = []
+                    remaining_retry = {}
+                    for rsym, rinfo in retry_queue.items():
+                        # Find matching coin in all_coins
+                        matched = next((c for c in all_coins if c['bybit_symbol'] == rsym), None)
+                        if matched:
+                            retry_coins_to_scan.append(matched)
+                        elif rinfo['retries'] < 5:
+                            remaining_retry[rsym] = rinfo  # Keep in queue if not found
+                    retry_queue = remaining_retry  # Clean up found ones
+                    
+                    # Scan retry coins first, then new coins
+                    scan_order = retry_coins_to_scan + [c for c in all_coins if c not in retry_coins_to_scan]
+                    
+                    for coin in scan_order:
                         if coin['bybit_symbol'] in open_symbols:
                             continue
                         if coin['bybit_symbol'] in already_traded:
@@ -355,21 +518,52 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                         ohlcv_data = await asyncio.to_thread(
                             scanner.fetch_multi_timeframe, coin['symbol']
                         )
+                        
+                        # Check if fetch failed (all timeframes None)
+                        fetch_ok = any(ohlcv_data.get(tf) is not None for tf in TIMEFRAMES)
+                        if not fetch_ok:
+                            # Add to retry queue for next scan
+                            bsym = coin['bybit_symbol']
+                            prev = retry_queue.get(bsym, {'retries': 0})
+                            if prev['retries'] < 5:  # Max 5 retries
+                                retry_queue[bsym] = {
+                                    'retries': prev['retries'] + 1,
+                                    'coin': coin,
+                                }
+                                log.info(f"🔄 RETRY_QUEUE: {coin['base']} added (attempt {prev['retries']+1}/5)")
+                            continue
 
-                        # PURE PRICE ACTION: analyze() handles everything
-                        # Ascending Triangle: Flat Resistance + Higher Lows
-                        # Entry: HL Trendline Touch / Demand 3x Retest
-                        # Internal guards: anti-pump candle, slope check
+                        # Remove from retry queue on success
+                        retry_queue.pop(coin['bybit_symbol'], None)
+
+                        # PURE PRICE ACTION: Route based on BTC 13 EMA Daily bias
                         for tf in TIMEFRAMES:
                             df = ohlcv_data.get(tf)
                             if df is None or len(df) < 60:
                                 continue
 
-                            signal = analyze(df, coin['symbol'], tf)
+                            signal = None
+
+                            if btc_bias == 'LONG':
+                                # BTC > 13 EMA → LONG ONLY (ascending triangle bounce)
+                                signal = analyze(df, coin['symbol'], tf)
+
+                            elif btc_bias == 'SHORT':
+                                # BTC < 13 EMA → SHORT ONLY
+                                # 1. LH Short (H1 rejection dari resistance trendline)
+                                signal = analyze_lh_short(df, coin['symbol'], tf)
+
+                                # 2. Breakdown Short (M15 entry dari ascending triangle failure)
+                                if not signal:
+                                    df_m15 = ohlcv_data.get('15m')
+                                    if df_m15 is not None and len(df_m15) >= 20:
+                                        signal = analyze_breakdown_short(df, df_m15, coin['symbol'], tf)
+
                             if signal:
                                 # Filter Minimal Confidence 45/100
                                 if signal.get('confidence', 0) < 45:
-                                    log.info(f"⚠️ CONFIDENCE_REJECT {tf}: {coin['base']} score={signal['confidence']} < 45")
+                                    log.info(f"⚠️ CONFIDENCE_REJECT {tf}: {coin['base']} "
+                                             f"{signal.get('direction','?')} score={signal['confidence']} < 45")
                                     continue
                                 signal['bybit_symbol'] = coin['bybit_symbol']
                                 signal['volume_24h'] = coin['volume_24h']
@@ -377,14 +571,17 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                                 signals.append(signal)
                                 break
 
-                        if len(signals) >= slots:
+                        if len(signals) >= (slots if btc_bias == 'LONG' else short_slots):
                             break
 
                     WEB.signals_found = len(signals)
 
                     # ── Step 5: Execute trades ──────────────────
                     for signal in signals:
-                        if slots <= 0:
+                        direction = signal.get('direction', 'LONG')
+                        if direction == 'SHORT' and short_slots <= 0:
+                            break
+                        elif direction == 'LONG' and slots <= 0:
                             break
 
                         try:
@@ -400,22 +597,35 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                                 leverage=leverage,
                                 min_qty=minfo['min_qty'],
                                 qty_step=minfo['qty_step'],
+                                direction=signal.get('direction', 'LONG'),
                             )
 
                             if not sizing:
                                 log.warning(f"Cannot size position for {signal['symbol']}")
                                 continue
 
-                            # Execute order
-                            result = await asyncio.to_thread(
-                                executor.open_long,
-                                signal['bybit_symbol'],
-                                sizing['qty'],
-                                leverage,
-                                signal['sl_price'],
-                                signal['tp_price'],
-                                minfo['price_precision'],
-                            )
+                            # Execute order — route LONG vs SHORT
+                            direction = signal.get('direction', 'LONG')
+                            if direction == 'SHORT':
+                                result = await asyncio.to_thread(
+                                    executor.open_short,
+                                    signal['bybit_symbol'],
+                                    sizing['qty'],
+                                    leverage,
+                                    signal['sl_price'],
+                                    signal['tp_price'],
+                                    minfo['price_precision'],
+                                )
+                            else:
+                                result = await asyncio.to_thread(
+                                    executor.open_long,
+                                    signal['bybit_symbol'],
+                                    sizing['qty'],
+                                    leverage,
+                                    signal['sl_price'],
+                                    signal['tp_price'],
+                                    minfo['price_precision'],
+                                )
 
                             if result and result.get('success'):
                                 # Save to DB
@@ -441,10 +651,14 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                                         'hl_touches': signal.get('hl_touches', 0),
                                         'resistance_retests': signal.get('resistance_retest_count', 0),
                                     }),
+                                    side='Sell' if direction == 'SHORT' else 'Buy',
                                 )
 
                                 already_traded.add(signal['bybit_symbol'])
-                                slots -= 1
+                                if direction == 'SHORT':
+                                    short_slots -= 1
+                                else:
+                                    slots -= 1
 
                                 # Telegram notification
                                 await tg_signal(session, signal, sizing, result)
@@ -473,7 +687,7 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                 WEB.last_scan_time = datetime.utcnow().strftime('%H:%M:%S')
                 WEB.last_scan_ms = scan_ms
                 WEB.stats = db.get_stats()
-                WEB.recent_trades = db.get_recent_trades(100)
+                WEB.recent_trades = db.get_recent_trades(20)  # Reduced from 100 → 20
                 # Get live data from Bybit to merge with DB positions
                 db_open = db.get_open_positions()
                 bybit_open = await asyncio.to_thread(executor.get_all_positions)
@@ -503,17 +717,21 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                     signals=WEB.signals_found,
                     scan_time_ms=scan_ms,
                 )
-                db.log_equity(equity, balance_info.get('available', 0), open_count)
+                db.log_equity(equity, balance_info.get('uta_available', 0), open_count)
 
+                bias_label = f"{btc_bias}({'📲MANUAL' if bias_source == 'MANUAL' else '📊EMA'})"
                 log.info(f"[SCAN #{WEB.scans}] {scan_ms}ms | "
+                         f"Mode:{bias_label} "
                          f"Alpha:{len(WEB.alpha_coins)} Signals:{WEB.signals_found} "
-                         f"Open:{open_count}/{MAX_OPEN_POSITIONS} "
+                         f"Open:L{long_count}/{MAX_OPEN_POSITIONS} S{short_count}/{MAX_SHORT_POSITIONS} "
                          f"Equity:${equity:.2f}")
 
             except Exception as scan_err:
                 log.error(f"Scan loop error: {scan_err}", exc_info=True)
                 WEB.status = 'ERROR'
 
+            # Free unused memory after each scan cycle
+            gc.collect()
             await asyncio.sleep(SCAN_INTERVAL_SEC)
 
 
@@ -564,50 +782,103 @@ async def monitor_loop(executor: BybitExecutor):
 
                         # Position still open — check for trailing stop and partial TP
                         current_price = live['mark_price']
+                        pos_side = pos.get('side', 'Buy')  # 'Buy' = LONG, 'Sell' = SHORT
+                        is_short = (pos_side == 'Sell')
+
                         if current_price > 0 and pos['entry_price'] > 0:
-                            # 1. Partial TP Check
-                            r_distance = pos['entry_price'] - pos['sl_price']
+                            # 1. Partial TP Check (direction-aware)
+                            if is_short:
+                                r_distance = pos['sl_price'] - pos['entry_price']  # SL above entry for SHORT
+                            else:
+                                r_distance = pos['entry_price'] - pos['sl_price']  # SL below entry for LONG
+
                             if r_distance > 0 and pos.get('partial_tp_done', 0) == 0:
-                                profit_in_r = (current_price - pos['entry_price']) / r_distance
+                                if is_short:
+                                    profit_in_r = (pos['entry_price'] - current_price) / r_distance
+                                else:
+                                    profit_in_r = (current_price - pos['entry_price']) / r_distance
+
                                 if profit_in_r >= PARTIAL_TP_RATIO:
                                     # Execute Partial TP (close 50%)
                                     close_qty = pos['qty'] * (PARTIAL_TP_PCT / 100.0)
-                                    # Round qty appropriately (can't use full precision on Bybit sometimes, but executor will handle or we just send it)
-                                    log.info(f"💰 PARTIAL TP TRIGGERED for {pos['bybit_symbol']} at +{profit_in_r:.2f}R")
-                                    success = await asyncio.to_thread(
-                                        executor.close_long,
-                                        pos['bybit_symbol'],
-                                        close_qty
-                                    )
-                                    if success:
-                                        db.mark_partial_tp(pos['id'])
-                                        await tg_send(session,
-                                            f"💰 <b>PARTIAL TP ({PARTIAL_TP_PCT}%)</b>\n"
-                                            f"📈 {pos['bybit_symbol']} (+{profit_in_r:.1f}R)\n"
-                                            f"Locked profit at {current_price:.6f}"
+                                    log.info(f"💰 PARTIAL TP TRIGGERED for {pos['bybit_symbol']} {'SHORT' if is_short else 'LONG'} at +{profit_in_r:.2f}R")
+
+                                    if is_short:
+                                        success = await asyncio.to_thread(
+                                            executor.close_short,
+                                            pos['bybit_symbol'],
+                                            close_qty
+                                        )
+                                    else:
+                                        success = await asyncio.to_thread(
+                                            executor.close_long,
+                                            pos['bybit_symbol'],
+                                            close_qty
                                         )
 
-                            # 2. Trailing Stop Check
-                            new_sl = calculate_trailing_sl(
-                                entry_price=pos['entry_price'],
-                                current_price=current_price,
-                                original_sl=pos['sl_price'],
-                                current_sl=live.get('stop_loss', pos['sl_price']),
-                            )
+                                    if success:
+                                        db.mark_partial_tp(pos['id'])
+                                        # Move SL to breakeven after partial TP
+                                        if is_short:
+                                            be_sl = pos['entry_price'] - (pos['entry_price'] * 0.001)
+                                        else:
+                                            be_sl = pos['entry_price'] + (pos['entry_price'] * 0.001)
+                                        be_success = await asyncio.to_thread(
+                                            executor.update_sl_tp,
+                                            pos['bybit_symbol'],
+                                            sl_price=be_sl,
+                                        )
+                                        if be_success:
+                                            db.update_sl(pos['id'], be_sl)
 
-                            if new_sl and new_sl > live.get('stop_loss', 0):
-                                # Update SL on Bybit (server-side)
-                                success = await asyncio.to_thread(
-                                    executor.update_sl_tp,
-                                    pos['bybit_symbol'],
-                                    sl_price=new_sl,
+                                        dir_emoji = '📉' if is_short else '📈'
+                                        await tg_send(session,
+                                            f"💰 <b>PARTIAL TP ({PARTIAL_TP_PCT}%)</b>\n"
+                                            f"{dir_emoji} {pos['bybit_symbol']} {'SHORT' if is_short else 'LONG'} (+{profit_in_r:.1f}R)\n"
+                                            f"Locked profit at {current_price:.6f}\n"
+                                            f"SL → breakeven {be_sl:.6f}"
+                                        )
+
+                            # 2. Trailing Stop Check (direction-aware)
+                            if is_short:
+                                new_sl = calculate_trailing_sl_short(
+                                    entry_price=pos['entry_price'],
+                                    current_price=current_price,
+                                    original_sl=pos['sl_price'],
+                                    current_sl=live.get('stop_loss', pos['sl_price']),
                                 )
-                                if success:
-                                    db.update_sl(pos['id'], new_sl)
-                                    await tg_send(session,
-                                        f"📈 <b>TRAILING SL</b>\n"
-                                        f"{pos['bybit_symbol']}: SL → {new_sl:.6f}"
+                                # For SHORT, SL moves DOWN
+                                if new_sl and new_sl < live.get('stop_loss', float('inf')):
+                                    success = await asyncio.to_thread(
+                                        executor.update_sl_tp,
+                                        pos['bybit_symbol'],
+                                        sl_price=new_sl,
                                     )
+                                    if success:
+                                        db.update_sl(pos['id'], new_sl)
+                                        await tg_send(session,
+                                            f"📉 <b>TRAILING SL SHORT</b>\n"
+                                            f"{pos['bybit_symbol']}: SL → {new_sl:.6f}"
+                                        )
+                            else:
+                                new_sl = calculate_trailing_sl(
+                                    entry_price=pos['entry_price'],
+                                    current_price=current_price,
+                                    original_sl=pos['sl_price'],
+                                    current_sl=live.get('stop_loss', pos['sl_price']),
+                                )
+                                if new_sl and new_sl > live.get('stop_loss', 0):
+                                    success = await asyncio.to_thread(
+                                        executor.update_sl_tp,
+                                        pos['bybit_symbol'],
+                                        sl_price=new_sl,
+                                    )
+                                    if success:
+                                        db.update_sl(pos['id'], new_sl)
+                                        await tg_send(session,
+                                            f"📈 <b>TRAILING SL</b>\n"
+                                            f"{pos['bybit_symbol']}: SL → {new_sl:.6f}"
+                                        )
 
                     except Exception as pos_err:
                         log.error(f"Monitor error for #{pos['id']}: {pos_err}")
@@ -659,14 +930,19 @@ async def lifespan(app: FastAPI):
     scanner = MarketScanner()
     executor = BybitExecutor()
 
-    # Load markets
-    try:
-        await asyncio.to_thread(scanner.load_markets)
-    except Exception as e:
-        log.error(f"Failed to load markets: {e}")
-        WEB.status = 'MARKET_LOAD_FAILED'
-        yield
-        return
+    # Load markets with robust retry loop
+    for attempt in range(1, 11):
+        try:
+            await asyncio.to_thread(scanner.load_markets)
+            break
+        except Exception as e:
+            log.error(f"Failed to load markets (Attempt {attempt}/10): {e}")
+            if attempt == 10:
+                WEB.status = 'MARKET_LOAD_FAILED'
+                yield
+                return
+            log.info("Waiting 10 seconds before retrying...")
+            await asyncio.sleep(10)
 
     # Get initial equity
     equity = await asyncio.to_thread(executor.get_equity)
@@ -737,6 +1013,12 @@ async def api_diagnose():
         ex = ccxt.bybit({
             'apiKey': BYBIT_API_KEY, 'secret': BYBIT_API_SECRET,
             'options': {'defaultType': 'swap'},
+            'urls': {
+                'api': {
+                    'public': 'https://api.bytick.com',
+                    'private': 'https://api.bytick.com',
+                }
+            },
         })
 
         for coin in coins:
@@ -787,7 +1069,27 @@ async def api_diagnose():
 # ══════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ══════════════════════════════════════════════════════════════
+def _kill_port(port: int):
+    """Kill any process occupying the given port (prevents Errno 48)."""
+    try:
+        result = subprocess.run(
+            ['lsof', '-ti', f':{port}'],
+            capture_output=True, text=True, timeout=5
+        )
+        pids = result.stdout.strip().split('\n')
+        my_pid = str(os.getpid())
+        for pid in pids:
+            pid = pid.strip()
+            if pid and pid != my_pid:
+                log.warning(f"Killing stale process on port {port}: PID {pid}")
+                os.kill(int(pid), signal.SIGKILL)
+                time.sleep(0.5)
+    except Exception as e:
+        log.debug(f"Port cleanup: {e}")
+
+
 if __name__ == '__main__':
+    _kill_port(WEB_PORT)
     uvicorn.run(
         "main:app",
         host="0.0.0.0",

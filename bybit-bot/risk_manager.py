@@ -215,15 +215,16 @@ def calculate_trailing_sl(entry_price: float, current_price: float,
 def calculate_trailing_sl_short(entry_price: float, current_price: float,
                                 original_sl: float, current_sl: float) -> Optional[float]:
     """
-    Trailing stop for SHORT: move SL DOWN toward entry after profit >= threshold.
+    Trailing stop for SHORT: progressively move SL DOWN as profit grows.
 
-    SHORT: SL starts ABOVE entry price.
+    SHORT: SL starts ABOVE entry price. Profit = price drops below entry.
     1R = original_sl - entry_price (the risk distance)
     
-    Profit stages:
-    - At 0.5R profit → reduce SL to entry + 0.3R (reduce risk)
-    - At 0.8R profit → move SL to breakeven (entry + tiny buffer)
-    - At 1.2R profit → lock profit, SL at entry - 0.3R (below entry)
+    Progressive stages (each stage locks more profit):
+    - At 0.5R profit → SL to entry + 0.3R (reduce risk from 1R to 0.3R)
+    - At 1.0R profit → SL to entry (breakeven)
+    - At 1.5R profit → SL to entry - 0.5R (lock 0.5R profit)
+    - At 2.0R profit → SL to entry - 1.0R (lock 1.0R profit)
     """
     r_distance = original_sl - entry_price  # 1R distance (positive, SL above entry)
     if r_distance <= 0:
@@ -232,19 +233,23 @@ def calculate_trailing_sl_short(entry_price: float, current_price: float,
     # For SHORT, profit = price DROP from entry
     profit_in_r = (entry_price - current_price) / r_distance
 
-    if profit_in_r >= 1.2:
-        # At 1.2R profit, lock 0.3R profit → SL below entry
-        new_sl = entry_price - (r_distance * 0.3)
-    elif profit_in_r >= 0.8:
-        # At 0.8R profit, move SL to breakeven → SL at entry + tiny buffer ABOVE
-        new_sl = entry_price + (entry_price * 0.001)
+    if profit_in_r >= 2.0:
+        # Lock 1.0R profit
+        new_sl = entry_price - (r_distance * 1.0)
+    elif profit_in_r >= 1.5:
+        # Lock 0.5R profit
+        new_sl = entry_price - (r_distance * 0.5)
+    elif profit_in_r >= 1.0:
+        # Breakeven — SL at entry (tiny buffer above)
+        new_sl = entry_price + (entry_price * 0.0005)
     elif profit_in_r >= 0.5:
-        # At 0.5R profit, reduce risk → SL at entry + 0.3R (still above entry, less risk)
+        # Reduce risk — SL at entry + 0.3R
         new_sl = entry_price + (r_distance * 0.3)
     else:
         return None  # Not enough profit to trail
 
     # Only move SL DOWN (closer to profit for SHORT), never up
+    # Use <= to prevent getting stuck when SL == target
     if new_sl < current_sl:
         log.info(f"📉 TRAILING SL SHORT: {current_sl:.6f} → {new_sl:.6f} "
                  f"(profit={profit_in_r:.1f}R)")

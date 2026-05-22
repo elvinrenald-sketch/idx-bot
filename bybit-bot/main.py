@@ -840,8 +840,8 @@ async def monitor_loop(executor: BybitExecutor):
                                         db.mark_partial_tp(pos['id'])
                                         # Move SL to breakeven after partial TP
                                         if is_short:
-                                            # SHORT: SL harus ABOVE entry (+ tiny buffer)
-                                            be_sl = pos['entry_price'] + (pos['entry_price'] * 0.001)
+                                            # SHORT: SL ABOVE entry (+ tiny buffer, aligned with trailing)
+                                            be_sl = pos['entry_price'] + (pos['entry_price'] * 0.0005)
                                         else:
                                             be_sl = pos['entry_price'] + (pos['entry_price'] * 0.001)
                                         be_success = await asyncio.to_thread(

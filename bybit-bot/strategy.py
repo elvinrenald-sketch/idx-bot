@@ -906,7 +906,7 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
     if df is None or len(df) < 60:
         return None
 
-    SHORT_TRENDLINE_TOLERANCE = 0.20  # ULTRA STRICT — entry harus SANGAT DEKAT trendline resistance (0.20%)
+    SHORT_TRENDLINE_TOLERANCE = 0.50  # Entry harus dekat trendline resistance (0.50%)
 
     try:
         atr = calc_atr(df, 14)
@@ -917,10 +917,12 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         p_highs = detect_pivot_highs(df)
 
         if len(p_highs) < 2:
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: < 2 pivot highs ({len(p_highs)})")
             return None
 
         has_lh, lh_indices = detect_lower_highs(df, p_highs)
         if not has_lh or len(lh_indices) < 2:
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no LH pattern")
             return None
 
         # ═══ STEP 2: VALIDATE DESCENDING RANGE ═══
@@ -939,32 +941,33 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
 
         total_lh_range_pct = ((first_lh_price - last_lh_price) / first_lh_price) * 100
         if total_lh_range_pct < MIN_ASCENDING_RANGE_PCT:
-            log.info(f"🔻 LH_SHORT NEAR {symbol} {timeframe}: has LH pattern but range {total_lh_range_pct:.1f}% < {MIN_ASCENDING_RANGE_PCT}%")
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: range {total_lh_range_pct:.1f}% < {MIN_ASCENDING_RANGE_PCT}%")
             return None
 
         slope_per_candle = (last_lh_price - first_lh_price) / candle_span
         slope_pct_per_candle = abs((slope_per_candle / first_lh_price) * 100)
         if slope_pct_per_candle > 1.0:
-            log.info(f"🔻 LH_SHORT NEAR {symbol} {timeframe}: slope too steep {slope_pct_per_candle:.2f}%/candle")
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: slope too steep {slope_pct_per_candle:.2f}%/candle")
             return None
 
         # ═══ STEP 3: RESISTANCE TRENDLINE ═══
 
         trendline_price = _calc_resistance_trendline(df, lh_indices)
         if not trendline_price or trendline_price <= 0:
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: trendline calc failed")
             return None
 
         # ═══ STEP 4: ENTRY VALIDATION — harga dekat resistance ═══
 
         # Harga harus di BAWAH trendline resistance
         if current_price >= trendline_price:
-            log.info(f"🔻 LH_SHORT NEAR {symbol} {timeframe}: price ABOVE trendline ({current_price:.4f} >= {trendline_price:.4f})")
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: price {current_price:.4f} >= trendline {trendline_price:.4f}")
             return None
 
         # Harga harus DEKAT trendline resistance (dalam SHORT_TRENDLINE_TOLERANCE %)
         trendline_distance_pct = ((trendline_price - current_price) / trendline_price) * 100
         if trendline_distance_pct > SHORT_TRENDLINE_TOLERANCE:
-            log.info(f"🔻 LH_SHORT NEAR {symbol} {timeframe}: too far from resistance "
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: too far from resistance "
                       f"({trendline_distance_pct:.2f}% > {SHORT_TRENDLINE_TOLERANCE}%)")
             return None
 
@@ -978,8 +981,8 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
             recent_min_low = min(lookback_lows)
             bounce_depth_pct = ((trendline_price - recent_min_low) / trendline_price) * 100
             if bounce_depth_pct < 2.0:
-                log.info(f"🔻 LH_SHORT NEAR {symbol} {timeframe}: no bounce-up "
-                          f"(low only {bounce_depth_pct:.2f}% below trendline, need ≥2.0%)")
+                log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no bounce-up detected "
+                          f"(recent low only {bounce_depth_pct:.2f}% below trendline, need ≥2.0%)")
                 return None
 
         # CHECK 2: Harga harus NAIK mendekati trendline, bukan jatuh
@@ -992,7 +995,7 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
             )
             price_rising = float(df['close'].iloc[-1]) > float(df['close'].iloc[-4])
             if bullish_count == 0 and not price_rising:
-                log.info(f"🔻 LH_SHORT NEAR {symbol} {timeframe}: free-fall detected "
+                log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: free-fall detected "
                           f"(0 bullish candles in last 3, price not rising)")
                 return None
 
@@ -1004,7 +1007,7 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         upper_wick = entry_candle['high'] - max(entry_candle['open'], entry_candle['close'])
 
         is_bearish = candle_body < 0
-        has_wick_rejection = candle_range > 0 and (upper_wick / candle_range) > 0.30  # 30% wick
+        has_wick_rejection = candle_range > 0 and (upper_wick / candle_range) > 0.15  # 15% wick
 
         if not is_bearish and not has_wick_rejection:
             log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no bearish confirmation")

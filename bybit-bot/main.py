@@ -340,6 +340,7 @@ async def sync_positions_from_bybit(executor: BybitExecutor, session):
                 leverage = pos['leverage']
                 sl = pos['stop_loss']
                 tp = pos['take_profit']
+                bybit_side = pos.get('side', 'Buy')  # 'Buy' = LONG, 'Sell' = SHORT
 
                 # Convert SOLUSDT → SOL/USDT:USDT
                 base = symbol.replace('USDT', '')
@@ -360,13 +361,15 @@ async def sync_positions_from_bybit(executor: BybitExecutor, session):
                     alpha_pct=0,
                     volume_ratio=1.0,
                     signal_data=json.dumps({'synced': True, 'source': 'bybit_sync'}),
+                    side=bybit_side,
                 )
-                log.info(f"🔄 SYNCED orphan position: #{pos_id} {symbol} "
+                direction_label = 'SHORT' if bybit_side == 'Sell' else 'LONG'
+                log.info(f"🔄 SYNCED orphan position: #{pos_id} {symbol} {direction_label} "
                          f"@ {entry_price:.4f} qty={size} lev={leverage}x")
 
                 await tg_send(session,
                     f"🔄 <b>POSITION SYNCED</b>\n"
-                    f"📊 {symbol} (dari Bybit)\n"
+                    f"📊 {symbol} ({direction_label} dari Bybit)\n"
                     f"💰 Entry: {entry_price:.4f}\n"
                     f"🛑 SL: {sl:.4f}\n"
                     f"🎯 TP: {tp:.4f}\n"
@@ -380,6 +383,29 @@ async def sync_positions_from_bybit(executor: BybitExecutor, session):
         else:
             log.info(f"🔄 Position sync: {len(bybit_positions)} on Bybit, "
                      f"{len(db_open)} in DB — all matched")
+
+        # Auto-fix: correct side for existing positions that have wrong direction
+        bybit_side_map = {p['symbol']: p.get('side', '') for p in bybit_positions}
+        fixed = 0
+        conn = db._connect()
+        for p in db_open:
+            correct_side = bybit_side_map.get(p['bybit_symbol'], '')
+            if not correct_side:
+                # Fallback: detect from SL position
+                if p['sl_price'] > p['entry_price']:
+                    correct_side = 'Sell'  # SL above entry = SHORT
+                else:
+                    correct_side = 'Buy'   # SL below entry = LONG
+            if correct_side and p['side'] != correct_side:
+                conn.execute("UPDATE positions SET side=? WHERE id=?", (correct_side, p['id']))
+                old_dir = 'LONG' if p['side'] == 'Buy' else 'SHORT'
+                new_dir = 'LONG' if correct_side == 'Buy' else 'SHORT'
+                log.info(f"🔧 AUTO-FIX side: #{p['id']} {p['bybit_symbol']} {old_dir} → {new_dir}")
+                fixed += 1
+        if fixed > 0:
+            conn.commit()
+            log.info(f"🔧 Fixed {fixed} positions with wrong side")
+        conn.close()
 
     except Exception as e:
         log.error(f"Position sync error: {e}")

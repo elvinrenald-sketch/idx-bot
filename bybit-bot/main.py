@@ -37,7 +37,7 @@ from config import (
 )
 import db
 from scanner import MarketScanner
-from strategy import analyze, analyze_breakdown_short, analyze_lh_short, diagnose_analyze, is_pucuk, is_pump_candle, calc_atr, is_bullish_structure
+from strategy import analyze, analyze_lh_short, diagnose_analyze, is_pucuk, is_pump_candle, calc_atr, is_bullish_structure
 from risk_manager import calculate_leverage, calculate_position_size, calculate_trailing_sl, calculate_trailing_sl_short
 from executor import BybitExecutor
 
@@ -550,14 +550,8 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
 
                             elif btc_bias == 'SHORT':
                                 # BTC < 13 EMA → SHORT ONLY
-                                # 1. LH Short (H1 rejection dari resistance trendline)
+                                # LH Short (H1 rejection dari resistance trendline)
                                 signal = analyze_lh_short(df, coin['symbol'], tf)
-
-                                # 2. Breakdown Short (M15 entry dari ascending triangle failure)
-                                if not signal:
-                                    df_m15 = ohlcv_data.get('15m')
-                                    if df_m15 is not None and len(df_m15) >= 20:
-                                        signal = analyze_breakdown_short(df, df_m15, coin['symbol'], tf)
 
                             if signal:
                                 # Filter Minimal Confidence 45/100
@@ -820,7 +814,8 @@ async def monitor_loop(executor: BybitExecutor):
                                         db.mark_partial_tp(pos['id'])
                                         # Move SL to breakeven after partial TP
                                         if is_short:
-                                            be_sl = pos['entry_price'] - (pos['entry_price'] * 0.001)
+                                            # SHORT: SL harus ABOVE entry (+ tiny buffer)
+                                            be_sl = pos['entry_price'] + (pos['entry_price'] * 0.001)
                                         else:
                                             be_sl = pos['entry_price'] + (pos['entry_price'] * 0.001)
                                         be_success = await asyncio.to_thread(

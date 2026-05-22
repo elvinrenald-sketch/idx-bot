@@ -999,19 +999,6 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
                           f"(0 bullish candles in last 3, price not rising)")
                 return None
 
-        # ═══ STEP 5: BEARISH CONFIRMATION ═══
-
-        entry_candle = df.iloc[-1]
-        candle_body = entry_candle['close'] - entry_candle['open']
-        candle_range = entry_candle['high'] - entry_candle['low']
-        upper_wick = entry_candle['high'] - max(entry_candle['open'], entry_candle['close'])
-
-        is_bearish = candle_body < 0
-        has_wick_rejection = candle_range > 0 and (upper_wick / candle_range) > 0.15  # 15% wick
-
-        if not is_bearish and not has_wick_rejection:
-            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no bearish confirmation")
-            return None
 
         # No pump candle
         if is_pump_candle(df, atr):
@@ -1051,9 +1038,9 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
 
         # Confidence
         _lh_bonus = min(25, max(0, (len(lh_indices) - 2) * 12))
-        _body_bonus = 10 if (is_bearish and candle_range > 0 and abs(candle_body) / candle_range >= 0.5) else 5
+        _bounce_bonus = 10 if trendline_distance_pct <= 0.25 else 5  # Closer to trendline = better
         _precision_bonus = 15 if trendline_distance_pct <= 0.5 else 10
-        _confidence = min(100, 45 + _lh_bonus + _body_bonus + _precision_bonus)
+        _confidence = min(100, 45 + _lh_bonus + _bounce_bonus + _precision_bonus)
 
         lh_prices = [round(float(df['high'].iloc[i]), 6) for i in lh_indices]
 

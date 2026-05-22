@@ -805,23 +805,38 @@ async def monitor_loop(executor: BybitExecutor):
                         pos_side = pos.get('side', 'Buy')  # 'Buy' = LONG, 'Sell' = SHORT
                         is_short = (pos_side == 'Sell')
 
-                        if current_price > 0 and pos['entry_price'] > 0:
-                            # 1. Partial TP Check (direction-aware)
-                            if is_short:
-                                r_distance = pos['sl_price'] - pos['entry_price']  # SL above entry for SHORT
-                            else:
-                                r_distance = pos['entry_price'] - pos['sl_price']  # SL below entry for LONG
+                        # Use original_sl (never changes) for R-distance; fallback to sl_price
+                        orig_sl = pos.get('original_sl') or pos['sl_price']
 
-                            if r_distance > 0 and pos.get('partial_tp_done', 0) == 0:
+                        # Get current SL from Bybit; if 0 or missing, use DB value
+                        bybit_sl = live.get('stop_loss', 0)
+                        if bybit_sl <= 0:
+                            bybit_sl = pos['sl_price']
+
+                        if current_price > 0 and pos['entry_price'] > 0:
+                            # Calculate R-distance from ORIGINAL SL (never changes)
+                            if is_short:
+                                r_distance = orig_sl - pos['entry_price']  # SL above entry
+                            else:
+                                r_distance = pos['entry_price'] - orig_sl  # SL below entry
+
+                            # Calculate current profit in R
+                            if r_distance > 0:
                                 if is_short:
                                     profit_in_r = (pos['entry_price'] - current_price) / r_distance
                                 else:
                                     profit_in_r = (current_price - pos['entry_price']) / r_distance
+                            else:
+                                profit_in_r = 0
 
+                            direction = 'SHORT' if is_short else 'LONG'
+
+                            # 1. Partial TP Check
+                            if r_distance > 0 and pos.get('partial_tp_done', 0) == 0:
                                 if profit_in_r >= PARTIAL_TP_RATIO:
-                                    # Execute Partial TP (close 50%)
                                     close_qty = pos['qty'] * (PARTIAL_TP_PCT / 100.0)
-                                    log.info(f"💰 PARTIAL TP TRIGGERED for {pos['bybit_symbol']} {'SHORT' if is_short else 'LONG'} at +{profit_in_r:.2f}R")
+                                    log.info(f"💰 PARTIAL TP TRIGGERED for {pos['bybit_symbol']} {direction} "
+                                             f"at +{profit_in_r:.2f}R (price={current_price:.6f})")
 
                                     if is_short:
                                         success = await asyncio.to_thread(
@@ -838,12 +853,8 @@ async def monitor_loop(executor: BybitExecutor):
 
                                     if success:
                                         db.mark_partial_tp(pos['id'])
-                                        # Move SL to breakeven after partial TP
-                                        if is_short:
-                                            # SHORT: SL ABOVE entry (+ tiny buffer, aligned with trailing)
-                                            be_sl = pos['entry_price'] + (pos['entry_price'] * 0.0005)
-                                        else:
-                                            be_sl = pos['entry_price'] + (pos['entry_price'] * 0.001)
+                                        # Move SL to breakeven
+                                        be_sl = pos['entry_price'] + (pos['entry_price'] * 0.0005)
                                         be_success = await asyncio.to_thread(
                                             executor.update_sl_tp,
                                             pos['bybit_symbol'],
@@ -855,21 +866,32 @@ async def monitor_loop(executor: BybitExecutor):
                                         dir_emoji = '📉' if is_short else '📈'
                                         await tg_send(session,
                                             f"💰 <b>PARTIAL TP ({PARTIAL_TP_PCT}%)</b>\n"
-                                            f"{dir_emoji} {pos['bybit_symbol']} {'SHORT' if is_short else 'LONG'} (+{profit_in_r:.1f}R)\n"
+                                            f"{dir_emoji} {pos['bybit_symbol']} {direction} (+{profit_in_r:.1f}R)\n"
                                             f"Locked profit at {current_price:.6f}\n"
                                             f"SL → breakeven {be_sl:.6f}"
                                         )
 
-                            # 2. Trailing Stop Check (direction-aware)
-                            if is_short:
-                                new_sl = calculate_trailing_sl_short(
-                                    entry_price=pos['entry_price'],
-                                    current_price=current_price,
-                                    original_sl=pos['sl_price'],
-                                    current_sl=live.get('stop_loss', pos['sl_price']),
-                                )
-                                # For SHORT, SL moves DOWN
-                                if new_sl and new_sl < live.get('stop_loss', float('inf')):
+                            # 2. Trailing Stop Check (same logic for LONG and SHORT,
+                            #    just uses different function with inverted math)
+                            if r_distance > 0:
+                                if is_short:
+                                    new_sl = calculate_trailing_sl_short(
+                                        entry_price=pos['entry_price'],
+                                        current_price=current_price,
+                                        original_sl=orig_sl,
+                                        current_sl=bybit_sl,
+                                    )
+                                    should_update = new_sl is not None and new_sl < bybit_sl
+                                else:
+                                    new_sl = calculate_trailing_sl(
+                                        entry_price=pos['entry_price'],
+                                        current_price=current_price,
+                                        original_sl=orig_sl,
+                                        current_sl=bybit_sl,
+                                    )
+                                    should_update = new_sl is not None and new_sl > bybit_sl
+
+                                if should_update:
                                     success = await asyncio.to_thread(
                                         executor.update_sl_tp,
                                         pos['bybit_symbol'],
@@ -877,28 +899,11 @@ async def monitor_loop(executor: BybitExecutor):
                                     )
                                     if success:
                                         db.update_sl(pos['id'], new_sl)
+                                        dir_emoji = '📉' if is_short else '📈'
                                         await tg_send(session,
-                                            f"📉 <b>TRAILING SL SHORT</b>\n"
-                                            f"{pos['bybit_symbol']}: SL → {new_sl:.6f}"
-                                        )
-                            else:
-                                new_sl = calculate_trailing_sl(
-                                    entry_price=pos['entry_price'],
-                                    current_price=current_price,
-                                    original_sl=pos['sl_price'],
-                                    current_sl=live.get('stop_loss', pos['sl_price']),
-                                )
-                                if new_sl and new_sl > live.get('stop_loss', 0):
-                                    success = await asyncio.to_thread(
-                                        executor.update_sl_tp,
-                                        pos['bybit_symbol'],
-                                        sl_price=new_sl,
-                                    )
-                                    if success:
-                                        db.update_sl(pos['id'], new_sl)
-                                        await tg_send(session,
-                                            f"📈 <b>TRAILING SL</b>\n"
-                                            f"{pos['bybit_symbol']}: SL → {new_sl:.6f}"
+                                            f"{dir_emoji} <b>TRAILING SL {direction}</b>\n"
+                                            f"{pos['bybit_symbol']}: SL {bybit_sl:.6f} → {new_sl:.6f}\n"
+                                            f"Profit: +{profit_in_r:.1f}R"
                                         )
 
                     except Exception as pos_err:

@@ -179,11 +179,16 @@ def calculate_position_size(
 def calculate_trailing_sl(entry_price: float, current_price: float,
                           original_sl: float, current_sl: float) -> Optional[float]:
     """
-    Trailing stop: move SL to breakeven after profit >= 1R.
+    Trailing stop for LONG: progressively move SL UP as profit grows.
 
-    1R = entry - original_sl (the original risk distance)
-    When price reaches entry + 1R, move SL to entry (breakeven).
-    When price reaches entry + 2R, move SL to entry + 1R.
+    LONG: SL starts BELOW entry price. Profit = price rises above entry.
+    1R = entry_price - original_sl (the risk distance)
+    
+    Progressive stages (mirrors SHORT):
+    - At 0.5R profit → SL to entry - 0.3R (reduce risk from 1R to 0.3R)
+    - At 1.0R profit → SL to entry (breakeven)
+    - At 1.5R profit → SL to entry + 0.5R (lock 0.5R profit)
+    - At 2.0R profit → SL to entry + 1.0R (lock 1.0R profit)
     """
     r_distance = entry_price - original_sl  # 1R distance
     if r_distance <= 0:
@@ -191,19 +196,22 @@ def calculate_trailing_sl(entry_price: float, current_price: float,
 
     profit_in_r = (current_price - entry_price) / r_distance
 
-    if profit_in_r >= 1.2:
-        # At 1.2R profit, trail SL to entry + 0.5R
+    if profit_in_r >= 2.0:
+        # Lock 1.0R profit
+        new_sl = entry_price + (r_distance * 1.0)
+    elif profit_in_r >= 1.5:
+        # Lock 0.5R profit
         new_sl = entry_price + (r_distance * 0.5)
-    elif profit_in_r >= 0.8:
-        # At 0.8R profit, move SL to breakeven
-        new_sl = entry_price + (entry_price * 0.001)  # Tiny buffer above entry
+    elif profit_in_r >= 1.0:
+        # Breakeven — SL at entry (tiny buffer below)
+        new_sl = entry_price - (entry_price * 0.0005)
     elif profit_in_r >= 0.5:
-        # At 0.5R profit, move SL up to reduce risk to 0.3R
+        # Reduce risk — SL at entry - 0.3R
         new_sl = entry_price - (r_distance * 0.3)
     else:
         return None  # Not enough profit to trail
 
-    # Only move SL up, never down
+    # Only move SL UP (closer to profit for LONG), never down
     if new_sl > current_sl:
         log.info(f"📈 TRAILING SL: {current_sl:.6f} → {new_sl:.6f} "
                  f"(profit={profit_in_r:.1f}R)")

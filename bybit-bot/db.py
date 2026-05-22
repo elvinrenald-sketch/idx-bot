@@ -35,6 +35,7 @@ def init_db():
             qty             REAL NOT NULL,
             leverage        INTEGER NOT NULL,
             sl_price        REAL,
+            original_sl     REAL,
             tp_price        REAL,
             margin_used     REAL,
             status          TEXT NOT NULL DEFAULT 'OPEN',
@@ -78,6 +79,16 @@ def init_db():
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    # Migration: add original_sl column (preserves original SL for R-distance calculation)
+    try:
+        conn.execute("ALTER TABLE positions ADD COLUMN original_sl REAL")
+        # Backfill: copy sl_price to original_sl for existing positions
+        conn.execute("UPDATE positions SET original_sl = sl_price WHERE original_sl IS NULL")
+        conn.commit()
+        log.info("Migration: Added original_sl column and backfilled from sl_price")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     conn.close()
     log.info(f"Database initialized: {DB_PATH}")
 
@@ -93,11 +104,11 @@ def open_position(symbol: str, bybit_symbol: str, entry_price: float,
     cur = conn.execute("""
         INSERT INTO positions
             (symbol, bybit_symbol, side, entry_price, qty, leverage,
-             sl_price, tp_price, margin_used, status, signal_data,
+             sl_price, original_sl, tp_price, margin_used, status, signal_data,
              timeframe, open_ts, alpha_pct, volume_ratio)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?)
     """, (symbol, bybit_symbol, side, entry_price, qty, leverage,
-          sl_price, tp_price, margin_used, signal_data,
+          sl_price, sl_price, tp_price, margin_used, signal_data,
           timeframe, datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
           alpha_pct, volume_ratio))
     conn.commit()

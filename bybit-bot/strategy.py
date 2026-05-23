@@ -906,7 +906,7 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
     if df is None or len(df) < 60:
         return None
 
-    SHORT_TRENDLINE_TOLERANCE = 0.50  # Entry harus dekat trendline resistance (0.50%)
+    SHORT_TRENDLINE_TOLERANCE = 0.55  # Entry harus dekat trendline resistance (0.55%)
 
     try:
         atr = calc_atr(df, 14)
@@ -980,9 +980,9 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         if lookback_lows:
             recent_min_low = min(lookback_lows)
             bounce_depth_pct = ((trendline_price - recent_min_low) / trendline_price) * 100
-            if bounce_depth_pct < 2.0:
+            if bounce_depth_pct < 1.5:
                 log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no bounce-up detected "
-                          f"(recent low only {bounce_depth_pct:.2f}% below trendline, need ≥2.0%)")
+                          f"(recent low only {bounce_depth_pct:.2f}% below trendline, need ≥1.5%)")
                 return None
 
         # CHECK 2: Harga harus NAIK mendekati trendline, bukan jatuh

@@ -80,7 +80,31 @@ WEB = WebState()
 # ══════════════════════════════════════════════════════════════
 _active_chat_id: str = TG_CHAT_ID  # Start from env var, update dynamically
 _tg_offset: int = 0
-_manual_bias: str = ''  # '' = AUTO (use EMA), 'LONG' or 'SHORT' = manual override
+
+_manual_bias_file = os.path.join(DATA_DIR, 'bias.txt')
+
+def load_manual_bias() -> str:
+    if os.path.exists(_manual_bias_file):
+        try:
+            with open(_manual_bias_file, 'r') as f:
+                bias = f.read().strip()
+                if bias in ('LONG', 'SHORT', 'AUTO', ''):
+                    return '' if bias == 'AUTO' else bias
+        except Exception as e:
+            log.error(f"Failed to load manual bias: {e}")
+    return ''
+
+def save_manual_bias(bias: str):
+    try:
+        os.makedirs(os.path.dirname(_manual_bias_file), exist_ok=True)
+        store_val = 'AUTO' if not bias else bias
+        with open(_manual_bias_file, 'w') as f:
+            f.write(store_val)
+        log.info(f"📲 Saved manual bias '{store_val}' to persistent storage")
+    except Exception as e:
+        log.error(f"Failed to save manual bias: {e}")
+
+_manual_bias: str = load_manual_bias()
 
 
 async def tg_poll_updates(session: aiohttp.ClientSession):
@@ -121,6 +145,7 @@ async def tg_poll_updates(session: aiohttp.ClientSession):
                     if cb_data in ('bias_long', 'bias_short', 'bias_auto') and cb_chat_id:
                         if cb_data == 'bias_long':
                             _manual_bias = 'LONG'
+                            save_manual_bias('LONG')
                             reply = (
                                 '✅ <b>Mode: 📈 LONG ONLY</b>\n\n'
                                 '🔍 Bot AKTIF mencari posisi LONG:\n'
@@ -132,6 +157,7 @@ async def tg_poll_updates(session: aiohttp.ClientSession):
                             )
                         elif cb_data == 'bias_short':
                             _manual_bias = 'SHORT'
+                            save_manual_bias('SHORT')
                             reply = (
                                 '✅ <b>Mode: 📉 SHORT ONLY</b>\n\n'
                                 '🔍 Bot AKTIF mencari posisi SHORT:\n'
@@ -143,6 +169,7 @@ async def tg_poll_updates(session: aiohttp.ClientSession):
                             )
                         else:
                             _manual_bias = ''
+                            save_manual_bias('')
                             reply = (
                                 '✅ <b>Mode: 🤖 AUTO (BTC 13 EMA)</b>\n\n'
                                 '🔍 Bot otomatis pilih arah:\n'

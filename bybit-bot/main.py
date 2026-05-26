@@ -301,8 +301,19 @@ async def tg_signal(session: aiohttp.ClientSession, signal: Dict, sizing: Dict,
     entry = order_result.get('fill_price', signal['entry_price'])
     entry_type = signal.get('signal_type', 'LONG')
     entry_emoji = '📐' if 'TRENDLINE' in entry_type else '🏠'
-    retests = signal.get('resistance_retest_count', 0)
-    flat_res = signal.get('flat_resistance', 0)
+    direction = signal.get('direction', 'LONG')
+
+    if direction == 'SHORT':
+        touch_line = f"🔻 LH: {signal.get('hl_touches', 0)} touches\n"
+        res_line = f"📉 Trendline: {signal.get('trendline_price', 0.0):.4f}\n"
+        pct_line = f"📉 Drop: {signal.get('total_rise_pct', 0):.1f}%\n"
+    else:
+        retests = signal.get('resistance_retest_count', 0)
+        flat_res = signal.get('flat_resistance', 0)
+        touch_line = f"🔺 HL: {signal.get('hl_touches', 0)} touches\n"
+        res_line = f"🏔️ Resistance: {flat_res:.4f} | Retests: {retests}x\n"
+        pct_line = f"📈 Rise: {signal.get('total_rise_pct', 0):.1f}%\n"
+
     text = (
         f"🎯 <b>{entry_emoji} {entry_type}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -318,9 +329,9 @@ async def tg_signal(session: aiohttp.ClientSession, signal: Dict, sizing: Dict,
         f"🎲 Risk: ${sizing['risk_amount']:.4f} ({sizing['risk_pct']:.1f}%)\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 Vol: {signal.get('volume_ratio', 1.0)}x avg\n"
-        f"🔺 HL: {signal.get('hl_touches', 0)} touches\n"
-        f"🏔️ Resistance: {flat_res:.4f} | Retests: {retests}x\n"
-        f"📉 Rise: {signal.get('total_rise_pct', 0):.1f}%\n"
+        f"{touch_line}"
+        f"{res_line}"
+        f"{pct_line}"
         f"🧠 Confidence: {signal.get('confidence', 0)}/100"
     )
     await tg_send(session, text)

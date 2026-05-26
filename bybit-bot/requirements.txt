@@ -7,3 +7,4 @@ pybit==5.9.0
 pandas==2.2.3
 numpy==2.1.0
 requests>=2.31.0
+python-dotenv>=1.0.0

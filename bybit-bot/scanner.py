@@ -29,6 +29,14 @@ class MarketScanner:
         config = {
             'options': {'defaultType': 'swap'},
             'enableRateLimit': True,
+            'timeout': 45000,  # 45 seconds — Indonesian ISP to bytick.com spikes at night
+            # Use bytick.com mirror — bypasses Indonesian ISP DNS block on api.bybit.com
+            'urls': {
+                'api': {
+                    'public': 'https://api.bytick.com',
+                    'private': 'https://api.bytick.com',
+                }
+            },
         }
         if BYBIT_API_KEY:
             config['apiKey'] = BYBIT_API_KEY
@@ -103,6 +111,32 @@ class MarketScanner:
         except Exception:
             return 0.0
 
+    def fetch_btc_trend_bias(self) -> str:
+        """
+        Fetch BTC Daily candles and calculate 13 EMA.
+        Returns 'LONG' if BTC close > 13 EMA, 'SHORT' if below.
+        Returns 'LONG' as fallback if data fetch fails.
+        """
+        try:
+            df = self.fetch_ohlcv('BTC/USDT:USDT', '1d', limit=50)
+            if df is None or len(df) < 14:
+                log.warning("BTC Daily data unavailable, defaulting to LONG bias")
+                return 'LONG'
+
+            # Calculate 13 EMA
+            ema13 = df['close'].ewm(span=13, adjust=False).mean()
+            btc_close = df['close'].iloc[-1]
+            btc_ema13 = ema13.iloc[-1]
+
+            bias = 'LONG' if btc_close > btc_ema13 else 'SHORT'
+            log.info(f"📊 BTC TREND BIAS: {bias} | BTC=${btc_close:.0f} vs 13EMA=${btc_ema13:.0f} "
+                     f"({'ABOVE' if btc_close > btc_ema13 else 'BELOW'} by {abs(btc_close - btc_ema13):.0f})")
+            return bias
+
+        except Exception as e:
+            log.error(f"Failed to fetch BTC trend bias: {e}, defaulting to LONG")
+            return 'LONG'
+
     def scan_for_alpha(self) -> List[Dict]:
         """
         KALIMASADA-style Alpha scan:
@@ -114,10 +148,25 @@ class MarketScanner:
         if not self._markets_loaded:
             self.load_markets()
 
-        try:
-            tickers = self.exchange.fetch_tickers()
-        except Exception as e:
-            log.error(f"Failed to fetch tickers: {e}")
+        tickers = None
+        for attempt in range(5):
+            try:
+                tickers = self.exchange.fetch_tickers()
+                break  # Success
+            except Exception as e:
+                err_str = str(e)
+                is_network = ('timed out' in err_str or 'timeout' in err_str.lower() or
+                              'ConnectionError' in err_str or 'ConnectionReset' in err_str or
+                              'RemoteDisconnected' in err_str or 'NetworkError' in err_str)
+                if is_network and attempt < 4:
+                    wait = (attempt + 1) * 5  # 5, 10, 15, 20s
+                    log.warning(f"⏳ fetch_tickers timeout (attempt {attempt+1}/5). Retrying in {wait}s...")
+                    time.sleep(wait)
+                    continue
+                log.error(f"Failed to fetch tickers after {attempt+1} attempts: {e}")
+                return []
+        if tickers is None:
+            log.error("fetch_tickers returned None after all retries")
             return []
 
         # Get BTC benchmark (4h real-time)
@@ -264,6 +313,10 @@ class MarketScanner:
         now = time.time()
         if self._mcap_symbols and (now - self._mcap_last_fetch) < MARKETCAP_CACHE_SEC:
             return self._mcap_symbols  # Return cached
+            
+        # Prevent hammering CoinGecko if recently failed (wait at least 5 mins before retry)
+        if not self._mcap_symbols and getattr(self, '_cg_cooldown_until', 0) > now:
+            return self._mcap_symbols
 
         try:
             symbols = set()
@@ -278,6 +331,12 @@ class MarketScanner:
                 'sparkline': 'false',
             }
             resp = requests.get(url, params=params, timeout=15)
+            
+            if resp.status_code == 429:
+                log.warning("CoinGecko API rate limit (429). Cooling down for 5 minutes.")
+                self._cg_cooldown_until = now + 300
+                return self._mcap_symbols
+                
             resp.raise_for_status()
             data = resp.json()
 
@@ -293,6 +352,7 @@ class MarketScanner:
 
         except Exception as e:
             log.warning(f"CoinGecko API error: {e} — using cached or skipping filter")
+            self._cg_cooldown_until = now + 120 # Short cooldown on general errors
             return self._mcap_symbols  # Return old cache or empty set
 
     def scan_top_volume(self) -> List[Dict]:
@@ -308,10 +368,25 @@ class MarketScanner:
         if not self._markets_loaded:
             self.load_markets()
 
-        try:
-            tickers = self.exchange.fetch_tickers()
-        except Exception as e:
-            log.warning(f"Failed to fetch tickers for volume scan: {e}")
+        tickers = None
+        for attempt in range(5):
+            try:
+                tickers = self.exchange.fetch_tickers()
+                break  # Success
+            except Exception as e:
+                err_str = str(e)
+                is_network = ('timed out' in err_str or 'timeout' in err_str.lower() or
+                              'ConnectionError' in err_str or 'ConnectionReset' in err_str or
+                              'RemoteDisconnected' in err_str or 'NetworkError' in err_str)
+                if is_network and attempt < 4:
+                    wait = (attempt + 1) * 5  # 5, 10, 15, 20s
+                    log.warning(f"⏳ fetch_tickers timeout (volume scan, attempt {attempt+1}/5). Retrying in {wait}s...")
+                    time.sleep(wait)
+                    continue
+                log.error(f"Failed to fetch tickers (volume scan) after {attempt+1} attempts: {e}")
+                return []
+        if tickers is None:
+            log.error("fetch_tickers (volume scan) returned None after all retries")
             return []
 
         candidates = []
@@ -376,7 +451,7 @@ class MarketScanner:
         result = candidates[:60]
 
         log.info(f"Volume scan: {len(candidates)} candidates → top {len(result)} by volume "
-                 f"(filtered {mcap_filtered} outside top-{MARKETCAP_TOP_N} mcap)")
+                 f"(skipped {mcap_filtered} coins because they are IN top-{MARKETCAP_TOP_N} mcap)")
         if result:
             top3 = ', '.join([f"{c['base']}(${c['volume_24h']/1e6:.0f}M)" for c in result[:3]])
             log.info(f"Top volume: {top3}")
@@ -387,30 +462,55 @@ class MarketScanner:
                     limit: int = CANDLE_LOOKBACK) -> Optional[pd.DataFrame]:
         """
         Fetch OHLCV candlestick data as a clean DataFrame.
-        Returns None if fetch fails.
+        Returns None if fetch fails. Has built-in retry logic for rate limits.
         """
-        try:
-            time.sleep(RATE_LIMIT_DELAY)  # Rate limit protection
-            data = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                time.sleep(RATE_LIMIT_DELAY)  # Rate limit protection
+                data = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
 
-            if not data or len(data) < 20:
-                return None
+                if not data or len(data) < 20:
+                    return None
 
-            df = pd.DataFrame(data, columns=['timestamp', 'open', 'high',
-                                             'low', 'close', 'volume'])
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            for col in ['open', 'high', 'low', 'close', 'volume']:
-                df[col] = df[col].astype(float)
+                df = pd.DataFrame(data, columns=['timestamp', 'open', 'high',
+                                                 'low', 'close', 'volume'])
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                for col in ['open', 'high', 'low', 'close', 'volume']:
+                    df[col] = df[col].astype(float)
 
-            # Validate: no zero prices
-            if (df['close'] <= 0).any():
-                return None
+                # Validate: no zero prices
+                if (df['close'] <= 0).any():
+                    return None
 
-            return df
+                return df
 
-        except Exception as e:
-            log.warning(f"OHLCV fetch failed {symbol} {timeframe}: {e}")
-            return None
+            except ccxt.RateLimitExceeded as e:
+                wait_time = 10 * (attempt + 1)
+                log.warning(f"⚠️ Rate limit exceeded fetching {symbol} {timeframe}. Waiting {wait_time}s... (Attempt {attempt+1}/{max_retries})")
+                time.sleep(wait_time)
+            except (ccxt.RequestTimeout, ccxt.NetworkError) as e:
+                # Timeout / connection error — retry with backoff
+                wait_time = 5 * (attempt + 1)
+                log.warning(f"⏱️ Timeout/network error {symbol} {timeframe}: {e}. Retry in {wait_time}s (Attempt {attempt+1}/{max_retries})")
+                time.sleep(wait_time)
+            except Exception as e:
+                # If it's a generic API error containing '10006' or 'Too many visits'
+                err_str = str(e)
+                if '10006' in err_str or 'Too many visits' in err_str:
+                    wait_time = 10 * (attempt + 1)
+                    log.warning(f"⚠️ Bybit rate limit (10006) on {symbol} {timeframe}. Waiting {wait_time}s... (Attempt {attempt+1}/{max_retries})")
+                    time.sleep(wait_time)
+                elif 'timed out' in err_str.lower() or 'timeout' in err_str.lower():
+                    wait_time = 5 * (attempt + 1)
+                    log.warning(f"⏱️ Timeout {symbol} {timeframe}. Retry in {wait_time}s (Attempt {attempt+1}/{max_retries})")
+                    time.sleep(wait_time)
+                else:
+                    log.warning(f"OHLCV fetch failed {symbol} {timeframe}: {e}")
+                    return None
+                    
+        log.error(f"❌ Failed to fetch OHLCV for {symbol} after {max_retries} retries.")
+        return None
 
     def _calculate_correlation(self, coin_df: pd.DataFrame, btc_df: pd.DataFrame) -> float:
         """Calculate Pearson correlation of returns over 24h window."""
@@ -435,12 +535,14 @@ class MarketScanner:
             return 1.0
 
     def fetch_multi_timeframe(self, symbol: str) -> Dict[str, Optional[pd.DataFrame]]:
-        """Fetch OHLCV for all configured timeframes + Daily for Pucuk Protector."""
+        """Fetch OHLCV for all configured timeframes + Daily for Pucuk Protector + M15 for Breakdown SHORT."""
         result = {}
         for tf in TIMEFRAMES:
             result[tf] = self.fetch_ohlcv(symbol, tf)
         # Always fetch Daily for Pucuk Protector & Structure Validator
         result['1d'] = self.fetch_ohlcv(symbol, '1d', limit=50)
+        # Always fetch M15 for Breakdown SHORT entry confirmation
+        result['15m'] = self.fetch_ohlcv(symbol, '15m', limit=100)
         return result
 
     def close(self):

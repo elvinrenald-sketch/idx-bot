@@ -895,18 +895,19 @@ def analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
 
 def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[Dict]:
     """
-    Kalimasada v7.1 — DESCENDING TRENDLINE REJECTION SHORT
+    Kalimasada v7.2 — FIBONACCI RETRACEMENT SHORT
 
-    Mirror dari ascending triangle LONG (disederhanakan):
-    - Deteksi Lower Highs (LH) → trendline resistance MENURUN
-    - Entry saat harga mendekati trendline resistance dan DITOLAK
-    - TANPA flat support requirement (downtrend tidak punya lantai)
-    - SL di atas trendline, TP ke bawah (RR 1:1.3)
+    Deteksi Lower Highs → cari Swing Low setelah LH terakhir →
+    tarik Fibonacci dari Swing High (LH) ke Swing Low (LL) →
+    Entry SHORT saat harga retrace ke zona Fib 0.5-0.618.
+
+    Identik dengan cara manual tarik Fibonacci di TradingView:
+    - Point A = Swing High (LH terakhir, df['high'] wick)
+    - Point B = Swing Low (LL setelah LH, df['low'] wick)
+    - Entry di zona retracement 50%-61.8%
     """
     if df is None or len(df) < 60:
         return None
-
-    SHORT_TRENDLINE_TOLERANCE = 0.55  # Entry harus dekat trendline resistance (0.55%)
 
     try:
         atr = calc_atr(df, 14)
@@ -950,55 +951,126 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
             log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: slope too steep {slope_pct_per_candle:.2f}%/candle")
             return None
 
-        # ═══ STEP 3: RESISTANCE TRENDLINE ═══
+        # ═══ STEP 3: RESISTANCE TRENDLINE (reference) ═══
 
         trendline_price = _calc_resistance_trendline(df, lh_indices)
         if not trendline_price or trendline_price <= 0:
             log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: trendline calc failed")
             return None
 
-        # ═══ STEP 4: ENTRY VALIDATION — harga dekat resistance ═══
-
-        # Harga harus di BAWAH trendline resistance
-        if current_price >= trendline_price:
-            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: price {current_price:.4f} >= trendline {trendline_price:.4f}")
-            return None
-
-        # Harga harus DEKAT trendline resistance (dalam SHORT_TRENDLINE_TOLERANCE %)
-        trendline_distance_pct = ((trendline_price - current_price) / trendline_price) * 100
-        if trendline_distance_pct > SHORT_TRENDLINE_TOLERANCE:
-            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: too far from resistance "
-                      f"({trendline_distance_pct:.2f}% > {SHORT_TRENDLINE_TOLERANCE}%)")
-            return None
-
-        # ═══ BOUNCE-UP VALIDATION (STRICT v2) ═══
-        # Harga harus baru NAIK ke trendline (retest resistance dari bawah)
-        # Bukan free-fall dimana trendline turun mengikuti harga
+        # ═══ STEP 4: FIBONACCI RETRACEMENT — Swing HIGH → Swing LOW ═══
         #
-        # CHECK 1: low dari 3-5 candle terakhir harus JAUH di bawah trendline (min 1.5%)
-        lookback_lows = [float(df['low'].iloc[i]) for i in range(-5, -1) if abs(i) <= len(df)]
-        if lookback_lows:
-            recent_min_low = min(lookback_lows)
-            bounce_depth_pct = ((trendline_price - recent_min_low) / trendline_price) * 100
-            if bounce_depth_pct < 1.5:
-                log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no bounce-up detected "
-                          f"(recent low only {bounce_depth_pct:.2f}% below trendline, need ≥1.5%)")
+        # Cara manual di TradingView (SHORT entry):
+        # 1. Cari SWING HIGH: dari LH terdeteksi (titik puncak)
+        # 2. Cari SWING LOW: lowest low SETELAH swing high (titik bottom setelah drop)
+        # 3. Tarik Fibonacci dari Swing High ke Swing Low
+        # 4. Entry saat harga retrace NAIK ke zona 0.5-0.618
+        #
+        # PENTING: Iterasi setiap LH dari terbaru → terlama.
+        # Pakai LH pertama yang memberikan fib zone valid.
+
+        current_idx = len(df) - 1
+        swing_high = None
+        swing_low = None
+        swing_high_iloc = None
+        swing_low_iloc = None
+        fib_050 = None
+        fib_618 = None
+        fib_range = None
+
+        for i in range(len(lh_indices) - 1, -1, -1):
+            candidate_high_idx = lh_indices[i]
+            candidate_high = float(df['high'].iloc[candidate_high_idx])
+
+            # Cari swing low SETELAH LH ini (lowest low dari LH sampai current-1)
+            search_start = candidate_high_idx + 1
+            search_end = current_idx  # Exclude current candle
+
+            if search_end - search_start < 2:
+                continue  # Not enough candles after this LH
+
+            low_slice = df['low'].iloc[search_start:search_end].values
+            low_offset = int(low_slice.argmin())
+            candidate_low_idx = search_start + low_offset
+            candidate_low = float(df['low'].iloc[candidate_low_idx])
+
+            # Swing low must not be the last candle (need bounce confirmation)
+            if candidate_low_idx >= current_idx - 1:
+                continue
+
+            # Price must have bounced UP from swing low
+            if current_price <= candidate_low:
+                continue
+
+            # Calculate fib range
+            _fib_range = candidate_high - candidate_low
+            if _fib_range <= 0:
+                continue
+
+            # Minimum: drop harus >= 3% untuk meaningful Fib
+            _fib_range_pct = (_fib_range / candidate_high) * 100
+            if _fib_range_pct < 3.0:
+                continue
+
+            # Maximum: drop harus <= 15% agar SL tidak terlalu lebar
+            if _fib_range_pct > 15.0:
+                continue
+
+            # Calculate Fib levels
+            _fib_050 = candidate_low + (_fib_range * 0.5)
+            _fib_618 = candidate_low + (_fib_range * 0.618)
+
+            # Check if current price is IN the fib 0.5-0.618 zone
+            if _fib_050 <= current_price <= _fib_618:
+                swing_high = candidate_high
+                swing_high_iloc = candidate_high_idx
+                swing_low = candidate_low
+                swing_low_iloc = candidate_low_idx
+                fib_050 = _fib_050
+                fib_618 = _fib_618
+                fib_range = _fib_range
+                log.debug(f"🔻 LH_SHORT {symbol} {timeframe}: valid fib from LH[{i}] "
+                          f"SwH={candidate_high:.6f} SwL={candidate_low:.6f} "
+                          f"Fib[{_fib_050:.6f}-{_fib_618:.6f}] drop={_fib_range_pct:.1f}%")
+                break  # Use the most recent valid LH
+
+        if swing_high is None or swing_low is None:
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no LH gives valid fib zone "
+                      f"for price {current_price:.6f}")
+            return None
+
+        fib_range_pct = (fib_range / swing_high) * 100
+
+        # ═══ ENTRY DIRECTION: Harga HARUS masuk zona dari BAWAH (retrace) ═══
+        #
+        # VALID: Harga turun ke swing low → bouncing NAIK → masuk zona 0.5-0.618 dari BAWAH
+        # INVALID: Harga di ATAS zona → TURUN melewati zona (bukan retrace!)
+        #
+        # CHECK 1: BLOCK jika candle recent close di ATAS fib 0.618 → datang dari atas
+        # CHECK 2: REQUIRE minimal 1 candle recent close di BAWAH fib 0.5 → naik dari bawah
+
+        # CHECK 1: BLOCK — Jika candle -2, -3, atau -4 pernah close di ATAS fib 0.618,
+        # harga TURUN dari atas melewati zona, BUKAN retrace dari bawah.
+        for j in range(2, min(5, len(df))):
+            past_close = float(df['close'].iloc[-j])
+            if past_close > fib_618:
+                log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: candle -{j} close "
+                          f"{past_close:.6f} > fib_618 {fib_618:.6f} — price came FROM ABOVE")
                 return None
 
-        # CHECK 2: Harga harus NAIK mendekati trendline, bukan jatuh
-        # Minimal 1 dari 3 candle terakhir harus bullish (close > open)
-        # DAN close sekarang > close 3 candle lalu (harga bergerak NAIK)
-        if len(df) >= 5:
-            bullish_count = sum(
-                1 for i in range(-3, 0)
-                if df['close'].iloc[i] > df['open'].iloc[i]
-            )
-            price_rising = float(df['close'].iloc[-1]) > float(df['close'].iloc[-4])
-            if bullish_count == 0 and not price_rising:
-                log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: free-fall detected "
-                          f"(0 bullish candles in last 3, price not rising)")
-                return None
+        # CHECK 2: REQUIRE — Minimal 1 dari candle -2, -3, -4 harus close di BAWAH fib 0.5.
+        # Konfirmasi harga memang NAIK dari bawah masuk ke zona retracement.
+        entered_from_below = False
+        for j in range(2, min(5, len(df))):
+            past_close = float(df['close'].iloc[-j])
+            if past_close < fib_050:
+                entered_from_below = True
+                break
 
+        if not entered_from_below:
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no candle in [-2 to -4] "
+                      f"closed below fib_050 {fib_050:.6f} — NOT entering from below")
+            return None
 
         # No pump candle
         if is_pump_candle(df, atr):
@@ -1010,12 +1082,8 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         entry_price = current_price
         current_atr = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else entry_price * 0.02
 
-        atr_mult = ATR_SL_MULT.get(timeframe, ATR_SL_MULT_DEFAULT)
-        atr_sl_distance = current_atr * atr_mult
-
-        # SL: di ATAS trendline resistance
-        trendline_sl = trendline_price * (1 + SL_BUFFER_PCT / 100)
-        sl_price = max(trendline_sl, entry_price + atr_sl_distance)
+        # SL: di ATAS Swing High + buffer
+        sl_price = swing_high * (1 + SL_BUFFER_PCT / 100)
 
         # Floor: SL MINIMUM 2.5% dari entry
         min_sl_floor = entry_price * (MIN_SL_PCT / 100.0)
@@ -1036,11 +1104,12 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
 
         entry_type = 'LH_SHORT'
 
-        # Confidence
+        # Confidence — closer to 0.618 = higher quality retracement
         _lh_bonus = min(25, max(0, (len(lh_indices) - 2) * 12))
-        _bounce_bonus = 10 if trendline_distance_pct <= 0.25 else 5  # Closer to trendline = better
-        _precision_bonus = 15 if trendline_distance_pct <= 0.5 else 10
-        _confidence = min(100, 45 + _lh_bonus + _bounce_bonus + _precision_bonus)
+        fib_position = (current_price - swing_low) / fib_range if fib_range > 0 else 0
+        _fib_bonus = 15 if fib_position >= 0.58 else 10  # Near 0.618 = better
+        _precision_bonus = 15
+        _confidence = min(100, 45 + _lh_bonus + _fib_bonus + _precision_bonus)
 
         lh_prices = [round(float(df['high'].iloc[i]), 6) for i in lh_indices]
 
@@ -1055,8 +1124,8 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
             'sl_pct': round(sl_pct, 2),
             'tp_pct': round(tp_pct, 2),
             'rr_ratio': round(actual_rr, 2),
-            'resistance': round(trendline_price, 8),
-            'support': 0,
+            'resistance': round(swing_high, 8),
+            'support': round(swing_low, 8),
             'higher_lows': lh_prices,  # Actually lower highs
             'hl_touches': len(lh_indices),
             'flat_resistance': round(trendline_price, 8),
@@ -1070,12 +1139,17 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
             'atr': round(current_atr, 8),
             'atr_pct': round((current_atr / entry_price) * 100, 2),
             'confidence': _confidence,
+            'fib_050': round(fib_050, 8),
+            'fib_618': round(fib_618, 8),
+            'swing_high': round(swing_high, 8),
+            'swing_low': round(swing_low, 8),
         }
 
         log.info(f"🔻 [{entry_type}]: {symbol} {timeframe} | "
                  f"Entry={entry_price:.6f} SL={sl_price:.6f} TP={tp_price:.6f} | "
                  f"RR=1:{actual_rr:.1f} | Conf={_confidence} | "
-                 f"LH_touches={len(lh_indices)} | Dist={trendline_distance_pct:.2f}%")
+                 f"LH={len(lh_indices)} | "
+                 f"Fib[{fib_050:.6f}-{fib_618:.6f}] SwH={swing_high:.6f} SwL={swing_low:.6f}")
 
         return signal
 

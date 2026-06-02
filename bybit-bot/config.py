@@ -92,9 +92,9 @@ MIN_EQUITY_FOR_TRADE = 5.5   # [NEW] Minimum equity $5.5 USDT untuk boleh trade.
 FAILED_SYMBOL_COOLDOWN = 10  # [NEW] Cooldown: skip simbol yang gagal selama 10 scan (~10 menit)
 MIN_LEVERAGE       = 3       # Leverage minimum
 MAX_LEVERAGE       = 10      # Leverage maksimum
-DEFAULT_RR_RATIO   = 1.3     # Risk:Reward = 1:1.3 (TP realistis untuk M15 crypto)
-PARTIAL_TP_RATIO   = 0.8     # Close 50% posisi di profit 0.8R
-PARTIAL_TP_PCT     = 50      # Persentase size yang diclose saat partial TP
+DEFAULT_RR_RATIO   = 1.0     # Risk:Reward = 1:1 (TP = SL distance)
+PARTIAL_TP_RATIO   = 0.5     # Close 25% posisi di profit 0.5R + SL → BEP
+PARTIAL_TP_PCT     = 25      # Persentase size yang diclose saat partial TP
 TRAILING_BREAKEVEN = True    # Geser SL otomatis
 
 # SL Buffer
@@ -119,10 +119,38 @@ MAX_VOLUME_24H     = 250_000_000  # Volume 24h max $250M (skip mega cap BTC/ETH/
 MAX_SPREAD_PCT     = 0.15      # Spread max 0.15%
 MIN_PRICE          = 0.0001    # Harga minimum (filter dust coins)
 MIN_NOTIONAL_USDT  = 5.5       # Bybit minimum order $5 USDT (tambah buffer 10%)
-BLACKLIST_SYMBOLS  = [         # Koin yang di-skip (stablecoins, delisted, commodity)
+BLACKLIST_SYMBOLS  = [         # Koin yang di-skip (stablecoins, delisted, commodity, stock)
     'USDC/USDT:USDT', 'DAI/USDT:USDT', 'TUSD/USDT:USDT',
     'BUSD/USDT:USDT', 'FDUSD/USDT:USDT',
-    'CL/USDT:USDT',              # Crude Oil — commodity, butuh Terms agreement khusus
+    # ── Commodities & Metals ──
+    'XAU/USDT:USDT',             # Gold
+    'XAG/USDT:USDT',             # Silver
+    'CL/USDT:USDT',              # Crude Oil
+    'NG/USDT:USDT',              # Natural Gas
+    'HG/USDT:USDT',              # Copper
+    'PL/USDT:USDT',              # Platinum
+    # ── Stocks (butuh agreement + bukan crypto) ──
+    'NVDA/USDT:USDT',            # Nvidia
+    'MU/USDT:USDT',              # Micron
+    'AMDSTOCK/USDT:USDT',        # AMD
+    'SOXL/USDT:USDT',            # Semiconductor ETF
+    'NBIS/USDT:USDT',            # Nebius
+    'SNDK/USDT:USDT',            # SanDisk/WD
+    'ARM/USDT:USDT',             # ARM Holdings
+    'EWY/USDT:USDT',             # iShares South Korea
+    'INTC/USDT:USDT',            # Intel
+    'CBRS/USDT:USDT',            # Cobre Panama
+    'DRAM/USDT:USDT',            # Dram stock
+    'QCOM/USDT:USDT',            # Qualcomm
+    'QQQ/USDT:USDT',             # Nasdaq ETF
+    'RKLB/USDT:USDT',            # Rocket Lab
+    'SPCX/USDT:USDT',            # SPCX ETF
+    'MSFT/USDT:USDT',            # Microsoft
+    'CRCL/USDT:USDT',            # Circle
+    'MRVL/USDT:USDT',            # Marvell
+    'HOOD/USDT:USDT',            # Robinhood
+    'WDC/USDT:USDT',             # Western Digital
+    'DJT/USDT:USDT',             # Dow Jones
 ]
 
 # ══════════════════════════════════════════════════════════════

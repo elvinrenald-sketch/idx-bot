@@ -171,10 +171,10 @@ async def tg_poll_updates(session: aiohttp.ClientSession):
                             _manual_bias = ''
                             save_manual_bias('')
                             reply = (
-                                '✅ <b>Mode: 🤖 AUTO (BTC 13 EMA)</b>\n\n'
+                                '✅ <b>Mode: 🤖 AUTO (BTC H4 13 EMA)</b>\n\n'
                                 '🔍 Bot otomatis pilih arah:\n'
-                                '• BTC > 13 EMA → cari LONG\n'
-                                '• BTC < 13 EMA → cari SHORT\n\n'
+                                '• BTC > H4 13 EMA → cari LONG\n'
+                                '• BTC < H4 13 EMA → cari SHORT\n\n'
                                 'Cek log: <code>Mode:LONG/SHORT(📊EMA)</code>'
                             )
 
@@ -235,7 +235,7 @@ async def tg_send_bias_keyboard(session: aiohttp.ClientSession, chat_id: str):
                 f'Mode saat ini: <b>{current}</b>\n\n'
                 f'📈 LONG = bot hanya cari posisi LONG\n'
                 f'📉 SHORT = bot hanya cari posisi SHORT\n'
-                f'🤖 AUTO = otomatis dari BTC 13 EMA Daily'
+                f'🤖 AUTO = otomatis dari BTC H4 13 EMA'
             ),
             'parse_mode': 'HTML',
             'reply_markup': json.dumps({
@@ -304,8 +304,14 @@ async def tg_signal(session: aiohttp.ClientSession, signal: Dict, sizing: Dict,
     direction = signal.get('direction', 'LONG')
 
     if direction == 'SHORT':
+        fib_050 = signal.get('fib_050', 0)
+        fib_559 = signal.get('fib_559', 0)
+        fib_618 = signal.get('fib_618', 0)
+        sw_high = signal.get('swing_high', 0)
+        sw_low = signal.get('swing_low', 0)
         touch_line = f"🔻 LH: {signal.get('hl_touches', 0)} touches\n"
-        res_line = f"📉 Trendline: {signal.get('trendline_price', 0.0):.4f}\n"
+        res_line = (f"📐 Fib Zone: {fib_559:.4f} - {fib_618:.4f}\n"
+                    f"⬆️ SwingH: {sw_high:.4f} | ⬇️ SwingL: {sw_low:.4f}\n")
         pct_line = f"📉 Drop: {signal.get('total_rise_pct', 0):.1f}%\n"
     else:
         retests = signal.get('resistance_retest_count', 0)
@@ -479,9 +485,9 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
             f"💰 Equity: ${equity:.2f}\n"
             f"⚙️ Testnet: {BYBIT_TESTNET}\n"
             f"📊 Timeframes: {', '.join(TIMEFRAMES)}\n"
-            f"🎯 Strategy: Kalimasada v7 (BTC 13EMA Filter)\n"
-            f"📈 LONG: Ascending Triangle (BTC > 13EMA)\n"
-            f"📉 SHORT: LH Rejection + Breakdown (BTC < 13EMA)\n"
+            f"🎯 Strategy: Kalimasada v7 (BTC H4 13EMA Filter)\n"
+            f"📈 LONG: Ascending Triangle (BTC > H4 13EMA)\n"
+            f"📉 SHORT: LH Rejection + Breakdown (BTC < H4 13EMA)\n"
             f"📅 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
         )
 
@@ -531,7 +537,7 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                 all_coins = await asyncio.to_thread(scanner.scan_top_volume)
                 WEB.alpha_coins = all_coins[:30]  # Cap at 30 to save memory
 
-                # ── Step 3.5: Determine trade bias (manual override or BTC 13 EMA) ──
+                # ── Step 3.5: Determine trade bias (manual override or BTC H4 13 EMA) ──
                 if _manual_bias:
                     btc_bias = _manual_bias
                     bias_source = 'MANUAL'
@@ -600,7 +606,7 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                         # Remove from retry queue on success
                         retry_queue.pop(coin['bybit_symbol'], None)
 
-                        # PURE PRICE ACTION: Route based on BTC 13 EMA Daily bias
+                        # PURE PRICE ACTION: Route based on BTC H4 13 EMA bias
                         for tf in TIMEFRAMES:
                             df = ohlcv_data.get(tf)
                             if df is None or len(df) < 60:
@@ -609,11 +615,11 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                             signal = None
 
                             if btc_bias == 'LONG':
-                                # BTC > 13 EMA → LONG ONLY (ascending triangle bounce)
+                                # BTC > H4 13 EMA → LONG ONLY (ascending triangle bounce)
                                 signal = analyze(df, coin['symbol'], tf)
 
                             elif btc_bias == 'SHORT':
-                                # BTC < 13 EMA → SHORT ONLY
+                                # BTC < H4 13 EMA → SHORT ONLY
                                 # LH Short (H1 rejection dari resistance trendline)
                                 signal = analyze_lh_short(df, coin['symbol'], tf)
 
@@ -891,8 +897,11 @@ async def monitor_loop(executor: BybitExecutor):
 
                                     if success:
                                         db.mark_partial_tp(pos['id'])
-                                        # Move SL to breakeven
-                                        be_sl = pos['entry_price'] + (pos['entry_price'] * 0.0005)
+                                        # Move SL to breakeven (direction-aware)
+                                        if is_short:
+                                            be_sl = pos['entry_price'] + (pos['entry_price'] * 0.0005)
+                                        else:
+                                            be_sl = pos['entry_price'] - (pos['entry_price'] * 0.0005)
                                         be_success = await asyncio.to_thread(
                                             executor.update_sl_tp,
                                             pos['bybit_symbol'],

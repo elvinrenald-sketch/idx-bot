@@ -975,6 +975,7 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         swing_high_iloc = None
         swing_low_iloc = None
         fib_050 = None
+        fib_559 = None
         fib_618 = None
         fib_range = None
 
@@ -1018,20 +1019,22 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
 
             # Calculate Fib levels
             _fib_050 = candidate_low + (_fib_range * 0.5)
+            _fib_559 = candidate_low + (_fib_range * 0.559)  # Midpoint of 0.5-0.618
             _fib_618 = candidate_low + (_fib_range * 0.618)
 
-            # Check if current price is IN the fib 0.5-0.618 zone
-            if _fib_050 <= current_price <= _fib_618:
+            # Check if current price is IN the fib 0.559-0.618 zone (upper half of golden pocket)
+            if _fib_559 <= current_price <= _fib_618:
                 swing_high = candidate_high
                 swing_high_iloc = candidate_high_idx
                 swing_low = candidate_low
                 swing_low_iloc = candidate_low_idx
                 fib_050 = _fib_050
+                fib_559 = _fib_559
                 fib_618 = _fib_618
                 fib_range = _fib_range
                 log.debug(f"🔻 LH_SHORT {symbol} {timeframe}: valid fib from LH[{i}] "
                           f"SwH={candidate_high:.6f} SwL={candidate_low:.6f} "
-                          f"Fib[{_fib_050:.6f}-{_fib_618:.6f}] drop={_fib_range_pct:.1f}%")
+                          f"Fib[{_fib_559:.6f}-{_fib_618:.6f}] entry zone | fib050={_fib_050:.6f} drop={_fib_range_pct:.1f}%")
                 break  # Use the most recent valid LH
 
         if swing_high is None or swing_low is None:
@@ -1140,6 +1143,7 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
             'atr_pct': round((current_atr / entry_price) * 100, 2),
             'confidence': _confidence,
             'fib_050': round(fib_050, 8),
+            'fib_559': round(fib_559, 8),
             'fib_618': round(fib_618, 8),
             'swing_high': round(swing_high, 8),
             'swing_low': round(swing_low, 8),
@@ -1149,7 +1153,7 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
                  f"Entry={entry_price:.6f} SL={sl_price:.6f} TP={tp_price:.6f} | "
                  f"RR=1:{actual_rr:.1f} | Conf={_confidence} | "
                  f"LH={len(lh_indices)} | "
-                 f"Fib[{fib_050:.6f}-{fib_618:.6f}] SwH={swing_high:.6f} SwL={swing_low:.6f}")
+                 f"Fib[{fib_559:.6f}-{fib_618:.6f}] SwH={swing_high:.6f} SwL={swing_low:.6f}")
 
         return signal
 

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FitZone Pro — Kalkulator Fitness & Generator Jadwal Latihan Gratis</title>
+  <meta name="description" content="Hitung BMI, kebutuhan kalori harian, dan buat jadwal latihan gym custom secara gratis. Tools fitness terlengkap untuk pemula hingga menengah.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- NAVBAR -->
+  <nav class="navbar" id="navbar">
+    <a href="#" class="logo">Fit<span>Zone</span></a>
+    <ul class="nav-links" id="navLinks">
+      <li><a href="#hero" class="active">Home</a></li>
+      <li><a href="#kalkulator">Kalkulator</a></li>
+      <li><a href="#generator">Generator</a></li>
+    </ul>
+    <button class="hamburger" id="hamburger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero" id="hero">
+    <div class="hero-content">
+      <div class="hero-badge"><span class="pulse"></span> 100% Gratis — Tanpa Daftar</div>
+      <h1>Ubah Tubuhmu dengan <span class="highlight">Data & Rencana Tepat</span></h1>
+      <p>Gunakan alat gratis kami untuk menghitung kalori, BMI, dan membuat jadwal latihan custom-mu secara instan. Cocok untuk pemula hingga menengah.</p>
+      <a href="#generator" class="btn-primary">
+        Mulai Sekarang
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </a>
+    </div>
+  </section>
+
+  <!-- KALKULATOR -->
+  <section class="section" id="kalkulator">
+    <div class="section-header fade-in">
+      <span class="section-label">Calculate Zone</span>
+      <h2 class="section-title">Kalkulator Fitness</h2>
+      <p class="section-subtitle">Ketahui kondisi tubuhmu dengan hitungan yang akurat dan terpercaya.</p>
+    </div>
+    <div class="calc-grid">
+      <!-- BMI -->
+      <div class="calc-card fade-in">
+        <div class="calc-card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </div>
+        <h3>Kalkulator BMI</h3>
+        <p class="card-desc">Hitung Indeks Massa Tubuh untuk mengetahui apakah berat badanmu ideal.</p>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="bmi-berat">Berat Badan (kg)</label>
+            <input type="number" id="bmi-berat" placeholder="70" min="1" max="300">
+          </div>
+          <div class="form-group">
+            <label for="bmi-tinggi">Tinggi Badan (cm)</label>
+            <input type="number" id="bmi-tinggi" placeholder="170" min="50" max="250">
+          </div>
+        </div>
+        <button class="btn-calc" onclick="hitungBMI()">Hitung BMI</button>
+        <div class="result-box" id="bmi-result"></div>
+      </div>
+      <!-- KALORI -->
+      <div class="calc-card fade-in">
+        <div class="calc-card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2c.5 2.5 2 4 3.5 5.5C17 9 18 11.5 18 14a6 6 0 1 1-12 0c0-2.5 1-5 2.5-6.5C10 6 11.5 4.5 12 2z"/></svg>
+        </div>
+        <h3>Kalkulator Kalori</h3>
+        <p class="card-desc">Hitung kebutuhan kalori harian (TDEE) berdasarkan rumus Harris-Benedict.</p>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="kal-berat">Berat (kg)</label>
+            <input type="number" id="kal-berat" placeholder="70" min="1" max="300">
+          </div>
+          <div class="form-group">
+            <label for="kal-tinggi">Tinggi (cm)</label>
+            <input type="number" id="kal-tinggi" placeholder="170" min="50" max="250">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="kal-umur">Umur</label>
+            <input type="number" id="kal-umur" placeholder="25" min="10" max="100">
+          </div>
+          <div class="form-group">
+            <label for="kal-gender">Gender</label>
+            <select id="kal-gender">
+              <option value="">Pilih...</option>
+              <option value="pria">Pria</option>
+              <option value="wanita">Wanita</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="kal-aktivitas">Tingkat Aktivitas</label>
+          <select id="kal-aktivitas">
+            <option value="">Pilih...</option>
+            <option value="1.2">Sangat Jarang Olahraga</option>
+            <option value="1.375">Olahraga Ringan (1-3x/minggu)</option>
+            <option value="1.55">Olahraga Sedang (3-5x/minggu)</option>
+            <option value="1.725">Olahraga Berat (6-7x/minggu)</option>
+            <option value="1.9">Sangat Aktif / Atlet</option>
+          </select>
+        </div>
+        <button class="btn-calc" onclick="hitungKalori()">Hitung Kalori</button>
+        <div class="result-box" id="kalori-result"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- GENERATOR -->
+  <section class="section" id="generator">
+    <div class="section-header fade-in">
+      <span class="section-label">Generator Zone</span>
+      <h2 class="section-title">Buat Jadwal Latihanmu</h2>
+      <p class="section-subtitle">Jawab 3 pertanyaan sederhana dan dapatkan jadwal latihan mingguan yang sesuai untukmu.</p>
+    </div>
+    <div class="generator-container fade-in">
+      <div class="steps-indicator">
+        <div class="step-dot active">1</div>
+        <div class="step-line"></div>
+        <div class="step-dot">2</div>
+        <div class="step-line"></div>
+        <div class="step-dot">3</div>
+      </div>
+      <!-- Step 1 -->
+      <div class="step-content active" id="step-1">
+        <h3 class="step-title">Apa Tujuan Latihanmu?</h3>
+        <p class="step-subtitle">Pilih tujuan utama yang ingin kamu capai</p>
+        <div class="option-grid">
+          <div class="option-card" onclick="selectOption(1,'turun-bb')">
+            <span class="option-icon">🔥</span>
+            <div class="option-title">Turun Berat Badan</div>
+            <div class="option-desc">Bakar lemak & membentuk tubuh</div>
+          </div>
+          <div class="option-card" onclick="selectOption(1,'bulking')">
+            <span class="option-icon">💪</span>
+            <div class="option-title">Bulking / Massa</div>
+            <div class="option-desc">Tambah massa otot</div>
+          </div>
+          <div class="option-card" onclick="selectOption(1,'kebugaran')">
+            <span class="option-icon">❤️</span>
+            <div class="option-title">Jaga Kebugaran</div>
+            <div class="option-desc">Sehat & bugar sehari-hari</div>
+          </div>
+        </div>
+        <div class="step-nav">
+          <button class="btn-step primary" onclick="nextStep()">Lanjut →</button>
+        </div>
+      </div>
+      <!-- Step 2 -->
+      <div class="step-content" id="step-2">
+        <h3 class="step-title">Tingkat Keahlianmu?</h3>
+        <p class="step-subtitle">Pilih yang paling sesuai dengan pengalamanmu</p>
+        <div class="option-grid">
+          <div class="option-card" onclick="selectOption(2,'pemula')">
+            <span class="option-icon">🌱</span>
+            <div class="option-title">Pemula</div>
+            <div class="option-desc">Baru mulai atau &lt; 6 bulan</div>
+          </div>
+          <div class="option-card" onclick="selectOption(2,'menengah')">
+            <span class="option-icon">⚡</span>
+            <div class="option-title">Menengah</div>
+            <div class="option-desc">Sudah rutin 6+ bulan</div>
+          </div>
+        </div>
+        <div class="step-nav">
+          <button class="btn-step secondary" onclick="prevStep()">← Kembali</button>
+          <button class="btn-step primary" onclick="nextStep()">Lanjut →</button>
+        </div>
+      </div>
+      <!-- Step 3 -->
+      <div class="step-content" id="step-3">
+        <h3 class="step-title">Berapa Hari Latihan per Minggu?</h3>
+        <p class="step-subtitle">Pilih jadwal yang realistis untukmu</p>
+        <div class="option-grid">
+          <div class="option-card" onclick="selectOption(3,'3')">
+            <span class="option-icon">3️⃣</span>
+            <div class="option-title">3 Hari</div>
+            <div class="option-desc">Ideal untuk pemula</div>
+          </div>
+          <div class="option-card" onclick="selectOption(3,'4')">
+            <span class="option-icon">4️⃣</span>
+            <div class="option-title">4 Hari</div>
+            <div class="option-desc">Seimbang & efektif</div>
+          </div>
+          <div class="option-card" onclick="selectOption(3,'5')">
+            <span class="option-icon">5️⃣</span>
+            <div class="option-title">5 Hari</div>
+            <div class="option-desc">Untuk yang serius</div>
+          </div>
+        </div>
+        <div class="step-nav">
+          <button class="btn-step secondary" onclick="prevStep()">← Kembali</button>
+          <button class="btn-step primary" onclick="nextStep()">Buat Jadwal Saya 🚀</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Schedule Result -->
+    <div class="schedule-result" id="schedule-result">
+      <div class="schedule-header">
+        <h3>Jadwal Latihan Mingguanmu</h3>
+        <div class="schedule-tags">
+          <span class="schedule-tag" id="sched-goal"></span>
+          <span class="schedule-tag" id="sched-level"></span>
+          <span class="schedule-tag" id="sched-days"></span>
+        </div>
+      </div>
+      <div class="schedule-grid" id="schedule-grid"></div>
+      <div style="text-align:center;margin-top:32px;">
+        <button class="btn-primary" onclick="resetGenerator()" style="background:transparent;color:var(--accent);border:2px solid var(--accent);box-shadow:none;">Buat Ulang Jadwal</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <p>&copy; 2025 FitZone Pro. All Rights Reserved.</p>
+    <p><a href="#kalkulator">Kalkulator</a> · <a href="#generator">Generator</a></p>
+    <div class="disclaimer">
+      <strong>Disclaimer Kesehatan:</strong> Informasi di website ini bersifat edukatif dan bukan pengganti konsultasi medis profesional. Selalu konsultasikan dengan dokter atau pelatih bersertifikat sebelum memulai program latihan baru.
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

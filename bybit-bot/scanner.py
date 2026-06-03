@@ -113,14 +113,14 @@ class MarketScanner:
 
     def fetch_btc_trend_bias(self) -> str:
         """
-        Fetch BTC Daily candles and calculate 13 EMA.
+        Fetch BTC 4h candles and calculate 13 EMA.
         Returns 'LONG' if BTC close > 13 EMA, 'SHORT' if below.
         Returns 'LONG' as fallback if data fetch fails.
         """
         try:
-            df = self.fetch_ohlcv('BTC/USDT:USDT', '1d', limit=50)
+            df = self.fetch_ohlcv('BTC/USDT:USDT', '4h', limit=50)
             if df is None or len(df) < 14:
-                log.warning("BTC Daily data unavailable, defaulting to LONG bias")
+                log.warning("BTC H4 data unavailable, defaulting to LONG bias")
                 return 'LONG'
 
             # Calculate 13 EMA
@@ -129,7 +129,7 @@ class MarketScanner:
             btc_ema13 = ema13.iloc[-1]
 
             bias = 'LONG' if btc_close > btc_ema13 else 'SHORT'
-            log.info(f"📊 BTC TREND BIAS: {bias} | BTC=${btc_close:.0f} vs 13EMA=${btc_ema13:.0f} "
+            log.info(f"📊 BTC TREND BIAS: {bias} | BTC=${btc_close:.0f} vs H4 13EMA=${btc_ema13:.0f} "
                      f"({'ABOVE' if btc_close > btc_ema13 else 'BELOW'} by {abs(btc_close - btc_ema13):.0f})")
             return bias
 

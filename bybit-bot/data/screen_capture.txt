@@ -1,0 +1,124 @@
+0 lev=4x
+2026-05-19 21:33:09 [main] ð¨ TG sending to 6469687459...
+2026-05-19 21:33:09 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:33:10 [main] ð¨ Telegram sent OK to 6469687459
+2026-05-19 21:33:10 [db] DB OPEN #32: XPLUSDT Buy @ 0.082990 qty=169.0 lev=7x SL
+=0.085710 TP=0.079380
+2026-05-19 21:33:10 [main] ð
+                             SYNCED orphan position: #32 XPLUSDT @ 0.0830 qty=16
+9.0 lev=7x
+2026-05-19 21:33:10 [main] ð¨ TG sending to 6469687459...
+2026-05-19 21:33:10 [main] ð¨ Telegram sent OK to 6469687459
+2026-05-19 21:33:10 [db] DB OPEN #33: LDOUSDT Buy @ 0.350600 qty=46.0 lev=8x SL=
+0.360900 TP=0.337600
+2026-05-19 21:33:10 [main] ð
+                             SYNCED orphan position: #33 LDOUSDT @ 0.3506 qty=46
+.0 lev=8x
+2026-05-19 21:33:10 [main] ð¨ TG sending to 6469687459...
+2026-05-19 21:33:10 [main] ð¨ Telegram sent OK to 6469687459
+2026-05-19 21:33:10 [main] ð
+                             Synced 3 orphaned positions from Bybit
+2026-05-19 21:33:14 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:33:18 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:33:22 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:33:26 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:33:30 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:33:34 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:33:39 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:33:41 [scanner] ð CoinGecko top 100 market cap loaded: 100 symbols
+2026-05-19 21:33:41 [scanner] Volume scan: 225 candidates â top 60 by volume (sk
+ipped 54 coins because they are IN top-100 mcap)
+2026-05-19 21:33:41 [scanner] Top volume: BILL($59M), INJ($55M), LAB($49M)
+2026-05-19 21:33:42 [scanner] ð BTC TREND BIAS: SHORT | BTC=$76337 vs 13EMA=$786
+06 (BELOW by 2269)
+2026-05-19 21:33:43 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:33:47 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:33:51 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:33:55 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:33:59 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:34:04 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:34:08 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:34:12 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:34:16 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:34:20 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:34:25 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:34:28 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:34:33 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:34:37 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:34:41 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:34:45 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:34:49 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:34:53 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:34:58 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:35:02 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:35:06 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:35:06 [main] [SCAN #1] 115674ms | Mode:SHORT(ðEMA) Alpha:30 Signal
+s:0 Open:L4/3 S0/3 Equity:$15.53
+2026-05-19 21:35:10 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:35:14 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+2026-05-19 21:35:18 [main] TG getUpdates API error: {'ok': False, 'error_code':
+409, 'description': 'Conflict: terminated by other getUpdates request; make sure
+ that only one bot instance is running'}
+

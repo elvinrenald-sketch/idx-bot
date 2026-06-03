@@ -81,8 +81,8 @@ def detect_pivot_lows(df: pd.DataFrame, left: int = PIVOT_LEFT,
 
 def detect_pivot_highs(df: pd.DataFrame, left: int = PIVOT_LEFT,
                        right: int = PIVOT_RIGHT) -> List[int]:
-    """Detect pivot high points using body price (max of open, close)."""
-    highs = df[['open', 'close']].max(axis=1).values
+    """Detect pivot high points using wick high price."""
+    highs = df['high'].values
     n = len(highs)
     pivots = []
 

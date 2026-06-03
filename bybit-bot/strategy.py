@@ -967,7 +967,8 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         # 4. Entry saat harga retrace NAIK ke zona 0.5-0.618
         #
         # PENTING: Iterasi setiap LH dari terbaru → terlama.
-        # Pakai LH pertama yang memberikan fib zone valid.
+        # Pakai LH dengan SWING HIGH TERTINGGI yang memberikan fib zone valid.
+        # Ini sesuai cara manual trader: tarik fib dari LH paling prominent/tinggi.
 
         current_idx = len(df) - 1
         swing_high = None
@@ -978,6 +979,9 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         fib_559 = None
         fib_618 = None
         fib_range = None
+
+        # Collect ALL valid candidates, then pick the HIGHEST swing high
+        best_candidate = None
 
         for i in range(len(lh_indices) - 1, -1, -1):
             candidate_high_idx = lh_indices[i]
@@ -1013,8 +1017,8 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
             if _fib_range_pct < 3.0:
                 continue
 
-            # Maximum: drop harus <= 15% agar SL tidak terlalu lebar
-            if _fib_range_pct > 15.0:
+            # Maximum: drop harus <= 20% agar SL tidak terlalu lebar
+            if _fib_range_pct > 20.0:
                 continue
 
             # Calculate Fib levels
@@ -1024,18 +1028,34 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
 
             # Check if current price is IN the fib 0.559-0.618 zone (upper half of golden pocket)
             if _fib_559 <= current_price <= _fib_618:
-                swing_high = candidate_high
-                swing_high_iloc = candidate_high_idx
-                swing_low = candidate_low
-                swing_low_iloc = candidate_low_idx
-                fib_050 = _fib_050
-                fib_559 = _fib_559
-                fib_618 = _fib_618
-                fib_range = _fib_range
-                log.debug(f"🔻 LH_SHORT {symbol} {timeframe}: valid fib from LH[{i}] "
+                log.debug(f"🔻 LH_SHORT {symbol} {timeframe}: candidate from LH[{i}] "
                           f"SwH={candidate_high:.6f} SwL={candidate_low:.6f} "
-                          f"Fib[{_fib_559:.6f}-{_fib_618:.6f}] entry zone | fib050={_fib_050:.6f} drop={_fib_range_pct:.1f}%")
-                break  # Use the most recent valid LH
+                          f"Fib[{_fib_559:.6f}-{_fib_618:.6f}] drop={_fib_range_pct:.1f}%")
+
+                # Pick the candidate with the HIGHEST swing high
+                if best_candidate is None or candidate_high > best_candidate['swing_high']:
+                    best_candidate = {
+                        'swing_high': candidate_high,
+                        'swing_high_iloc': candidate_high_idx,
+                        'swing_low': candidate_low,
+                        'swing_low_iloc': candidate_low_idx,
+                        'fib_050': _fib_050,
+                        'fib_559': _fib_559,
+                        'fib_618': _fib_618,
+                        'fib_range': _fib_range,
+                    }
+
+        if best_candidate:
+            swing_high = best_candidate['swing_high']
+            swing_high_iloc = best_candidate['swing_high_iloc']
+            swing_low = best_candidate['swing_low']
+            swing_low_iloc = best_candidate['swing_low_iloc']
+            fib_050 = best_candidate['fib_050']
+            fib_559 = best_candidate['fib_559']
+            fib_618 = best_candidate['fib_618']
+            fib_range = best_candidate['fib_range']
+            log.debug(f"🔻 LH_SHORT {symbol} {timeframe}: BEST candidate "
+                      f"SwH={swing_high:.6f} SwL={swing_low:.6f}")
 
         if swing_high is None or swing_low is None:
             log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no LH gives valid fib zone "

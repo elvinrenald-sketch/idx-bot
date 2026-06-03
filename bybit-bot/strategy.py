@@ -981,6 +981,10 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         fib_range = None
 
         # Collect ALL valid candidates, then pick the HIGHEST swing high
+        # IMPORTANT: Do NOT check price-in-zone here. First find the HIGHEST
+        # valid swing high, THEN check if price is in its zone.
+        # This prevents the bot from falling back to a lower swing high
+        # with a lower (inferior) fib zone.
         best_candidate = None
 
         for i in range(len(lh_indices) - 1, -1, -1):
@@ -1026,40 +1030,43 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
             _fib_559 = candidate_low + (_fib_range * 0.559)  # Midpoint of 0.5-0.618
             _fib_618 = candidate_low + (_fib_range * 0.618)
 
-            # Check if current price is IN the fib 0.559-0.618 zone (upper half of golden pocket)
-            if _fib_559 <= current_price <= _fib_618:
-                log.debug(f"🔻 LH_SHORT {symbol} {timeframe}: candidate from LH[{i}] "
-                          f"SwH={candidate_high:.6f} SwL={candidate_low:.6f} "
-                          f"Fib[{_fib_559:.6f}-{_fib_618:.6f}] drop={_fib_range_pct:.1f}%")
+            log.debug(f"🔻 LH_SHORT {symbol} {timeframe}: valid LH[{i}] "
+                      f"SwH={candidate_high:.6f} SwL={candidate_low:.6f} "
+                      f"Fib[{_fib_559:.6f}-{_fib_618:.6f}] drop={_fib_range_pct:.1f}%")
 
-                # Pick the candidate with the HIGHEST swing high
-                if best_candidate is None or candidate_high > best_candidate['swing_high']:
-                    best_candidate = {
-                        'swing_high': candidate_high,
-                        'swing_high_iloc': candidate_high_idx,
-                        'swing_low': candidate_low,
-                        'swing_low_iloc': candidate_low_idx,
-                        'fib_050': _fib_050,
-                        'fib_559': _fib_559,
-                        'fib_618': _fib_618,
-                        'fib_range': _fib_range,
-                    }
+            # Pick the candidate with the HIGHEST swing high (regardless of price position)
+            if best_candidate is None or candidate_high > best_candidate['swing_high']:
+                best_candidate = {
+                    'swing_high': candidate_high,
+                    'swing_high_iloc': candidate_high_idx,
+                    'swing_low': candidate_low,
+                    'swing_low_iloc': candidate_low_idx,
+                    'fib_050': _fib_050,
+                    'fib_559': _fib_559,
+                    'fib_618': _fib_618,
+                    'fib_range': _fib_range,
+                }
 
-        if best_candidate:
-            swing_high = best_candidate['swing_high']
-            swing_high_iloc = best_candidate['swing_high_iloc']
-            swing_low = best_candidate['swing_low']
-            swing_low_iloc = best_candidate['swing_low_iloc']
-            fib_050 = best_candidate['fib_050']
-            fib_559 = best_candidate['fib_559']
-            fib_618 = best_candidate['fib_618']
-            fib_range = best_candidate['fib_range']
-            log.debug(f"🔻 LH_SHORT {symbol} {timeframe}: BEST candidate "
-                      f"SwH={swing_high:.6f} SwL={swing_low:.6f}")
+        if not best_candidate:
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no valid LH candidate found")
+            return None
 
-        if swing_high is None or swing_low is None:
-            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no LH gives valid fib zone "
-                      f"for price {current_price:.6f}")
+        swing_high = best_candidate['swing_high']
+        swing_high_iloc = best_candidate['swing_high_iloc']
+        swing_low = best_candidate['swing_low']
+        swing_low_iloc = best_candidate['swing_low_iloc']
+        fib_050 = best_candidate['fib_050']
+        fib_559 = best_candidate['fib_559']
+        fib_618 = best_candidate['fib_618']
+        fib_range = best_candidate['fib_range']
+        log.debug(f"🔻 LH_SHORT {symbol} {timeframe}: BEST (HIGHEST) candidate "
+                  f"SwH={swing_high:.6f} SwL={swing_low:.6f} "
+                  f"Fib559={fib_559:.6f} Fib618={fib_618:.6f}")
+
+        # NOW check if current price is in the fib zone of the HIGHEST swing high
+        if not (fib_559 <= current_price <= fib_618):
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: price {current_price:.6f} "
+                      f"NOT in highest SwH fib zone [{fib_559:.6f}-{fib_618:.6f}]")
             return None
 
         fib_range_pct = (fib_range / swing_high) * 100

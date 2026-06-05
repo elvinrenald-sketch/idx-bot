@@ -207,7 +207,7 @@ async def tg_poll_updates(session: aiohttp.ClientSession):
                 log.info(f"✅ Telegram Chat ID detected: {chat_id} "
                          f"({chat.get('first_name', '')} {chat.get('username', '')})")
                 await tg_send_raw(session, chat_id,
-                    f"✅ <b>Bybit Alpha Bot Connected!</b>\n"
+                    f"✅ <b>Hyperliquid Alpha Bot Connected!</b>\n"
                     f"💰 Equity: ${WEB.equity:.2f}\n"
                     f"🤖 Bot terhubung dan siap trading!\n\n"
                     f"Ketik /bias untuk pilih mode LONG/SHORT/AUTO"
@@ -486,8 +486,8 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
             f"⚙️ Testnet: {HL_TESTNET}\n"
             f"📊 Timeframes: {', '.join(TIMEFRAMES)}\n"
             f"🎯 Strategy: Kalimasada v7 (BTC H4 13EMA Filter)\n"
-            f"📈 LONG: Ascending Triangle (BTC > H4 13EMA)\n"
-            f"📉 SHORT: LH Rejection + Breakdown (BTC < H4 13EMA)\n"
+            f"📈 LONG: Ascending Triangle (BTC &gt; H4 13EMA)\n"
+            f"📉 SHORT: LH Rejection + Breakdown (BTC &lt; H4 13EMA)\n"
             f"📅 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
         )
 

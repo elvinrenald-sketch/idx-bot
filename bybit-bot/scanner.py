@@ -418,7 +418,7 @@ class MarketScanner:
                 start_time = end_time - (limit * secs * 1000)
 
                 data = self.info.candles_snapshot(
-                    coin=symbol,
+                    name=symbol,
                     interval=hl_interval,
                     startTime=start_time,
                     endTime=end_time

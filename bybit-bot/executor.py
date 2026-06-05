@@ -25,7 +25,7 @@ class HyperliquidExecutor:
         self.wallet = Account.from_key(HL_PRIVATE_KEY)
         self.address = HL_WALLET_ADDRESS or self.wallet.address
         self.info = Info(base_url, skip_ws=True)
-        self.exchange = Exchange(self.wallet, base_url)
+        self.exchange = Exchange(self.wallet, base_url, account_address=self.address)
         self._meta = None  # Cache for asset metadata
         self._refresh_meta()
         log.info(f"Hyperliquid Executor initialized (testnet={HL_TESTNET}, address={self.address[:10]}...)")

@@ -1,164 +1,117 @@
 """
-Bybit Crypto Algo Bot — Order Executor
-Uses pybit (official Bybit SDK) for order execution.
-SL/TP are set SERVER-SIDE on Bybit — they remain active even if bot dies.
+Hyperliquid Crypto Algo Bot — Order Executor
+Uses hyperliquid-python-sdk for order execution on Hyperliquid DEX.
+SL/TP are set as trigger orders on Hyperliquid's L1.
 """
 import logging
-import ssl
 import time
 from typing import Optional, Dict, List
-from pybit.unified_trading import HTTP
-from config import (
-    BYBIT_API_KEY, BYBIT_API_SECRET, BYBIT_TESTNET,
-)
 
-# Fix SSL issue on macOS/miniconda environments
-# The system SSL (miniconda) conflicts with Bybit's certificate chain
-try:
-    import certifi
-    import os
-    os.environ.setdefault('SSL_CERT_FILE', certifi.where())
-    os.environ.setdefault('REQUESTS_CA_BUNDLE', certifi.where())
-except ImportError:
-    pass
+from eth_account import Account
+from hyperliquid.exchange import Exchange
+from hyperliquid.info import Info
+from hyperliquid.utils.constants import MAINNET_API_URL, TESTNET_API_URL
+
+from config import HL_PRIVATE_KEY, HL_WALLET_ADDRESS, HL_TESTNET
 
 log = logging.getLogger('executor')
 
 
-class BybitExecutor:
-    """Handles all Bybit trading operations via pybit V5 API."""
+class HyperliquidExecutor:
+    """Handles all Hyperliquid trading operations via official SDK."""
 
     def __init__(self):
-        self.session = HTTP(
-            testnet=BYBIT_TESTNET,
-            api_key=BYBIT_API_KEY,
-            api_secret=BYBIT_API_SECRET,
-            domain='bytick',  # Use bytick.com mirror — bypasses Indonesian ISP DNS block
-            recv_window=10000,  # 10s receive window (server-side tolerance)
-            timeout=45,  # 45s HTTP timeout — ISP Indonesia spike di malam hari
-        )
-        self._position_mode_set = set()  # Track which symbols had position mode set
-        log.info(f"Bybit Executor initialized (testnet={BYBIT_TESTNET}, domain=bytick)")
+        base_url = TESTNET_API_URL if HL_TESTNET else MAINNET_API_URL
+        self.wallet = Account.from_key(HL_PRIVATE_KEY)
+        self.address = HL_WALLET_ADDRESS or self.wallet.address
+        self.info = Info(base_url, skip_ws=True)
+        self.exchange = Exchange(self.wallet, base_url)
+        self._meta = None  # Cache for asset metadata
+        self._refresh_meta()
+        log.info(f"Hyperliquid Executor initialized (testnet={HL_TESTNET}, address={self.address[:10]}...)")
 
-    # ══════════════════════════════════════════════════════════
-    # ACCOUNT INFO
-    # ══════════════════════════════════════════════════════════
+    def _refresh_meta(self):
+        """Refresh asset metadata from Hyperliquid."""
+        try:
+            self._meta = self.info.meta()
+        except Exception as e:
+            log.error(f"Failed to refresh meta: {e}")
 
-    _last_known_equity: float = 0.0  # Cache for fallback during timeouts
+    def _get_sz_decimals(self, coin: str) -> int:
+        """Get size decimals for a coin from meta."""
+        if self._meta:
+            for asset_info in self._meta['universe']:
+                if asset_info['name'] == coin:
+                    return asset_info['szDecimals']
+        return 2  # fallback
+
+    _last_known_equity: float = 0.0
 
     def get_equity(self) -> float:
-        """Get total equity in USDT (Unified + Funding).
-        Includes retry logic for network timeouts and cached fallback."""
+        """Get total account value in USD."""
         for attempt in range(3):
             try:
-                # 1. Total in Unified
-                uta_equity = 0.0
-                res_uta = self.session.get_wallet_balance(accountType="UNIFIED")
-                if res_uta['retCode'] == 0:
-                    for coin in res_uta['result']['list']:
-                        uta_equity += float(coin.get('totalEquity', 0))
-
-                # 2. Total in Funding (Requires 'Asset' permission)
-                fund_equity = 0.0
-                try:
-                    res_fund = self.session.get_coins_balance(accountType="FUND", coin="USDT")
-                    if res_fund['retCode'] == 0:
-                        # Bybit V5 get_coins_balance returns 'balance', NOT 'list'
-                        balance_list = res_fund['result'].get('balance', res_fund['result'].get('list', []))
-                        for coin in balance_list:
-                            fund_equity += float(coin.get('walletBalance', 0))
-                except Exception as e:
-                    if '10005' in str(e):
-                        pass  # API Key lacks 'Asset' permission — skip silently
-                    else:
-                        log.debug(f"Funding balance check skipped: {e}")
-
-                total = uta_equity + fund_equity
-                if total > 0:
-                    BybitExecutor._last_known_equity = total  # Cache good value
-                return total
-
+                state = self.info.user_state(self.address)
+                equity = float(state['marginSummary']['accountValue'])
+                if equity > 0:
+                    HyperliquidExecutor._last_known_equity = equity
+                return equity
             except Exception as e:
                 err_str = str(e)
                 if ('timed out' in err_str or 'timeout' in err_str.lower() or
-                    'ConnectionError' in err_str or 'ConnectionReset' in err_str):
+                    'ConnectionError' in err_str) and attempt < 2:
                     wait = (attempt + 1) * 3
                     log.warning(f"⏳ get_equity timeout (attempt {attempt+1}/3). Retrying in {wait}s...")
                     time.sleep(wait)
                     continue
                 log.error(f"Failed to get equity: {e}")
                 break
-
-        # All retries failed — return cached equity so bot doesn't halt
-        if BybitExecutor._last_known_equity > 0:
-            log.warning(f"Using cached equity: ${BybitExecutor._last_known_equity:.2f}")
-            return BybitExecutor._last_known_equity
+        if HyperliquidExecutor._last_known_equity > 0:
+            log.warning(f"Using cached equity: ${HyperliquidExecutor._last_known_equity:.2f}")
+            return HyperliquidExecutor._last_known_equity
         return 0.0
 
     def get_balance(self) -> Dict:
-        """Get detailed balance info across accounts.
-        Includes retry logic for network timeouts."""
+        """Get detailed balance info."""
         default = {'uta_equity': 0, 'uta_available': 0, 'fund_equity': 0, 'total_equity': 0}
         for attempt in range(3):
             try:
-                data = {
-                    'uta_equity': 0.0,
-                    'uta_available': 0.0,
+                state = self.info.user_state(self.address)
+                margin = state['marginSummary']
+                equity = float(margin['accountValue'])
+                available = float(state.get('withdrawable', 0))
+                return {
+                    'uta_equity': equity,
+                    'uta_available': available,
                     'fund_equity': 0.0,
-                    'total_equity': 0.0
+                    'total_equity': equity
                 }
-
-                # UTA
-                res_uta = self.session.get_wallet_balance(accountType="UNIFIED")
-                if res_uta['retCode'] == 0:
-                    for coin in res_uta['result']['list']:
-                        data['uta_equity'] += float(coin.get('totalEquity', 0))
-                        data['uta_available'] += float(coin.get('totalAvailableBalance', 0))
-
-                # Funding (Requires 'Asset' permission)
-                try:
-                    res_fund = self.session.get_coins_balance(accountType="FUND", coin="USDT")
-                    if res_fund['retCode'] == 0:
-                        # Bybit V5 get_coins_balance returns 'balance', NOT 'list'
-                        balance_list = res_fund['result'].get('balance', res_fund['result'].get('list', []))
-                        for coin in balance_list:
-                            data['fund_equity'] += float(coin.get('walletBalance', 0))
-                except Exception as e:
-                    if '10005' in str(e):
-                        pass  # API Key lacks 'Asset' permission — skip silently
-                    else:
-                        log.debug(f"Funding balance skipped: {e}")
-
-                data['total_equity'] = data['uta_equity'] + data['fund_equity']
-                return data
-
             except Exception as e:
                 err_str = str(e)
-                if ('timed out' in err_str or 'timeout' in err_str.lower() or
-                    'ConnectionError' in err_str or 'ConnectionReset' in err_str):
+                if ('timed out' in err_str or 'timeout' in err_str.lower()) and attempt < 2:
                     wait = (attempt + 1) * 3
                     log.warning(f"⏳ get_balance timeout (attempt {attempt+1}/3). Retrying in {wait}s...")
                     time.sleep(wait)
                     continue
                 log.error(f"Balance check error: {e}")
                 break
-
         return default
 
-
-
     def get_positions(self) -> List[Dict]:
-        """Get all active USDT linear positions (with retry for timeout)."""
+        """Get all active positions (raw list for sync)."""
         for attempt in range(3):
             try:
-                result = self.session.get_positions(category="linear", settleCoin="USDT")
-                if result['retCode'] != 0:
-                    return []
-                return result['result']['list']
+                state = self.info.user_state(self.address)
+                positions = []
+                for ap in state.get('assetPositions', []):
+                    pos = ap['position']
+                    szi = float(pos['szi'])
+                    if szi != 0:
+                        positions.append(pos)  # Return raw position dicts
+                return positions
             except Exception as e:
                 err_str = str(e)
-                if ('timed out' in err_str or 'timeout' in err_str.lower() or
-                    'ConnectionError' in err_str) and attempt < 2:
+                if ('timed out' in err_str or 'timeout' in err_str.lower()) and attempt < 2:
                     wait = (attempt + 1) * 3
                     log.warning(f"⏳ get_positions timeout (attempt {attempt+1}/3). Retrying in {wait}s...")
                     time.sleep(wait)
@@ -167,159 +120,107 @@ class BybitExecutor:
                 return []
         return []
 
-
-    # ══════════════════════════════════════════════════════════
-    # LEVERAGE & MARGIN
-    # ══════════════════════════════════════════════════════════
-
     def set_leverage(self, bybit_symbol: str, leverage: int) -> bool:
-        """Set leverage for a symbol. Must be called BEFORE placing order."""
+        """Set leverage for a coin. Must be called BEFORE placing order."""
         try:
-            lev_str = str(leverage)
-            result = self.session.set_leverage(
-                category="linear",
-                symbol=bybit_symbol,
-                buyLeverage=lev_str,
-                sellLeverage=lev_str,
-            )
-
-            ret_code = result.get('retCode', -1)
-
-            # retCode 0 = success
-            # retCode 110043 = leverage already set to this value (not an error)
-            if ret_code == 0 or ret_code == 110043:
-                log.info(f"Leverage set: {bybit_symbol} → {leverage}x")
-                return True
-            else:
-                log.error(f"Set leverage failed: {result}")
-                return False
-
+            # Hyperliquid: update_leverage(leverage, coin, is_cross)
+            # We use isolated margin (is_cross=False)
+            self.exchange.update_leverage(leverage, bybit_symbol, is_cross=False)
+            log.info(f"Leverage set: {bybit_symbol} → {leverage}x (isolated)")
+            return True
         except Exception as e:
             err_str = str(e)
-            if '110043' in err_str:
-                # Already set to this value
+            # If leverage is already set, treat as success
+            if 'already' in err_str.lower() or 'same' in err_str.lower():
                 log.info(f"Leverage already {leverage}x for {bybit_symbol}")
                 return True
             log.error(f"Set leverage error: {e}")
             return False
 
-    def _ensure_position_mode(self, bybit_symbol: str):
-        """Ensure one-way position mode (not hedge mode)."""
-        if bybit_symbol in self._position_mode_set:
-            return
-        try:
-            self.session.switch_position_mode(
-                category="linear",
-                symbol=bybit_symbol,
-                mode=0,  # 0 = One-Way Mode
-            )
-        except Exception:
-            pass  # Already in one-way mode or error — safe to ignore
-        self._position_mode_set.add(bybit_symbol)
-
-    # ══════════════════════════════════════════════════════════
-    # ORDER EXECUTION
-    # ══════════════════════════════════════════════════════════
-
     def open_long(self, bybit_symbol: str, qty: float, leverage: int,
                   sl_price: float, tp_price: float,
                   price_precision: float) -> Optional[Dict]:
-        """
-        Open a LONG position with server-side SL/TP.
-
-        Steps:
-        1. Set position mode (one-way)
-        2. Set leverage
-        3. Place market buy order with SL/TP (with retry on timeout)
-
-        The SL/TP live on BYBIT'S SERVER — if our bot dies, they stay active!
-        """
+        """Open a LONG position with SL/TP trigger orders."""
         try:
-            # Step 1: Position mode
-            self._ensure_position_mode(bybit_symbol)
-
-            # Step 2: Set leverage
+            # Step 1: Set leverage
             if not self.set_leverage(bybit_symbol, leverage):
                 log.error(f"Cannot set leverage for {bybit_symbol}, aborting")
                 return None
 
-            # Step 3: Round SL/TP to price precision
-            if price_precision > 0:
-                sl_str = str(round(sl_price, self._count_decimals(price_precision)))
-                tp_str = str(round(tp_price, self._count_decimals(price_precision)))
-            else:
-                sl_str = str(round(sl_price, 4))
-                tp_str = str(round(tp_price, 4))
+            # Step 2: Round qty to sz_decimals
+            sz_decimals = self._get_sz_decimals(bybit_symbol)
+            qty = round(qty, sz_decimals)
 
-            qty_str = str(qty)
-
-            # Step 4: Place market order with SL/TP (retry on timeout)
-            log.info(f"📤 PLACING ORDER: {bybit_symbol} BUY qty={qty_str} "
-                     f"lev={leverage}x SL={sl_str} TP={tp_str}")
+            # Step 3: Place market buy with SL/TP as TPSL group
+            log.info(f"📤 PLACING ORDER: {bybit_symbol} BUY qty={qty} "
+                     f"lev={leverage}x SL={sl_price} TP={tp_price}")
 
             result = None
             for attempt in range(3):
                 try:
-                    result = self.session.place_order(
-                        category="linear",
-                        symbol=bybit_symbol,
-                        side="Buy",
-                        orderType="Market",
-                        qty=qty_str,
-                        stopLoss=sl_str,
-                        takeProfit=tp_str,
-                        slTriggerBy="MarkPrice",
-                        tpTriggerBy="MarkPrice",
-                        timeInForce="GTC",
+                    result = self.exchange.market_open(
+                        bybit_symbol, True, qty, slippage=0.01
                     )
-                    break  # Success — exit retry loop
+                    break
                 except Exception as order_err:
                     err_str = str(order_err)
-                    if ('timed out' in err_str or 'timeout' in err_str.lower() or
-                        'ConnectionError' in err_str) and attempt < 2:
+                    if ('timed out' in err_str or 'timeout' in err_str.lower()) and attempt < 2:
                         wait = (attempt + 1) * 3
-                        log.warning(f"⏳ Order timeout (attempt {attempt+1}/3). Checking position in {wait}s...")
+                        log.warning(f"⏳ Order timeout (attempt {attempt+1}/3). Checking in {wait}s...")
                         time.sleep(wait)
-                        # Safety: check if order went through despite timeout
                         pos = self.get_position(bybit_symbol)
                         if pos and pos['size'] > 0:
                             log.info(f"✅ Order went through despite timeout! size={pos['size']}")
+                            # Place SL/TP trigger orders
+                            self._place_sl_tp(bybit_symbol, qty, False, sl_price, tp_price, price_precision)
                             return {
                                 'success': True,
                                 'order_id': 'timeout-recovery',
                                 'fill_price': pos['entry_price'],
                                 'qty': pos['size'],
                                 'leverage': leverage,
-                                'sl_price': float(sl_str),
-                                'tp_price': float(tp_str),
+                                'sl_price': sl_price,
+                                'tp_price': tp_price,
                             }
                         continue
-                    raise  # Non-timeout error — propagate
+                    raise
 
             if result is None:
                 log.error(f"❌ ORDER FAILED after 3 retries: {bybit_symbol}")
                 return None
 
-            ret_code = result.get('retCode', -1)
-            if ret_code != 0:
-                log.error(f"❌ ORDER FAILED: {result.get('retMsg', 'Unknown error')}")
+            # Check result
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            if not statuses or 'error' in str(statuses[0]).lower():
+                log.error(f"❌ ORDER FAILED: {statuses}")
                 return None
 
-            order_id = result['result'].get('orderId', '')
-            log.info(f"✅ ORDER PLACED: {bybit_symbol} orderId={order_id}")
+            # Get fill info
+            filled = statuses[0].get('filled', statuses[0].get('resting', {}))
+            fill_price = float(filled.get('avgPx', 0)) if filled else 0
+            total_sz = float(filled.get('totalSz', qty)) if filled else qty
 
-            # Step 5: Verify — get the actual fill price
+            log.info(f"✅ ORDER PLACED: {bybit_symbol} fill_price={fill_price}")
+
+            # Step 4: Place SL/TP trigger orders
             time.sleep(0.5)
-            fill_price = self._get_fill_price(bybit_symbol, order_id)
+            self._place_sl_tp(bybit_symbol, total_sz, False, sl_price, tp_price, price_precision)
+
+            # If fill_price is 0, get from position
+            if fill_price <= 0:
+                time.sleep(0.5)
+                pos = self.get_position(bybit_symbol)
+                if pos:
+                    fill_price = pos['entry_price']
 
             return {
                 'success': True,
-                'order_id': order_id,
+                'order_id': str(filled.get('oid', '')) if filled else '',
                 'fill_price': fill_price,
-                'qty': qty,
+                'qty': total_sz,
                 'leverage': leverage,
-                'sl_price': float(sl_str),
-                'tp_price': float(tp_str),
+                'sl_price': sl_price,
+                'tp_price': tp_price,
             }
 
         except Exception as e:
@@ -329,135 +230,152 @@ class BybitExecutor:
     def open_short(self, bybit_symbol: str, qty: float, leverage: int,
                    sl_price: float, tp_price: float,
                    price_precision: float) -> Optional[Dict]:
-        """
-        Open a SHORT position with server-side SL/TP.
-
-        Steps:
-        1. Set position mode (one-way)
-        2. Set leverage
-        3. Place market SELL order with SL/TP (with retry on timeout)
-
-        For SHORT: SL is ABOVE entry price, TP is BELOW entry price.
-        Bybit's server handles the inversion automatically.
-        """
+        """Open a SHORT position with SL/TP trigger orders."""
         try:
-            # Step 1: Position mode
-            self._ensure_position_mode(bybit_symbol)
-
-            # Step 2: Set leverage
             if not self.set_leverage(bybit_symbol, leverage):
                 log.error(f"Cannot set leverage for {bybit_symbol}, aborting SHORT")
                 return None
 
-            # Step 3: Round SL/TP to price precision
-            if price_precision > 0:
-                sl_str = str(round(sl_price, self._count_decimals(price_precision)))
-                tp_str = str(round(tp_price, self._count_decimals(price_precision)))
-            else:
-                sl_str = str(round(sl_price, 4))
-                tp_str = str(round(tp_price, 4))
+            sz_decimals = self._get_sz_decimals(bybit_symbol)
+            qty = round(qty, sz_decimals)
 
-            qty_str = str(qty)
-
-            # Step 4: Place market SELL order with SL/TP (retry on timeout)
-            log.info(f"📤 PLACING SHORT ORDER: {bybit_symbol} SELL qty={qty_str} "
-                     f"lev={leverage}x SL={sl_str} TP={tp_str}")
+            log.info(f"📤 PLACING SHORT ORDER: {bybit_symbol} SELL qty={qty} "
+                     f"lev={leverage}x SL={sl_price} TP={tp_price}")
 
             result = None
             for attempt in range(3):
                 try:
-                    result = self.session.place_order(
-                        category="linear",
-                        symbol=bybit_symbol,
-                        side="Sell",
-                        orderType="Market",
-                        qty=qty_str,
-                        stopLoss=sl_str,
-                        takeProfit=tp_str,
-                        slTriggerBy="MarkPrice",
-                        tpTriggerBy="MarkPrice",
-                        timeInForce="GTC",
+                    result = self.exchange.market_open(
+                        bybit_symbol, False, qty, slippage=0.01
                     )
-                    break  # Success — exit retry loop
+                    break
                 except Exception as order_err:
                     err_str = str(order_err)
-                    if ('timed out' in err_str or 'timeout' in err_str.lower() or
-                        'ConnectionError' in err_str) and attempt < 2:
+                    if ('timed out' in err_str or 'timeout' in err_str.lower()) and attempt < 2:
                         wait = (attempt + 1) * 3
-                        log.warning(f"⏳ Short order timeout (attempt {attempt+1}/3). Checking position in {wait}s...")
+                        log.warning(f"⏳ Short order timeout (attempt {attempt+1}/3). Checking in {wait}s...")
                         time.sleep(wait)
-                        # Safety: check if order went through despite timeout
                         pos = self.get_position(bybit_symbol)
                         if pos and pos['size'] > 0:
                             log.info(f"✅ Short order went through despite timeout! size={pos['size']}")
+                            self._place_sl_tp(bybit_symbol, qty, True, sl_price, tp_price, price_precision)
                             return {
                                 'success': True,
                                 'order_id': 'timeout-recovery',
                                 'fill_price': pos['entry_price'],
                                 'qty': pos['size'],
                                 'leverage': leverage,
-                                'sl_price': float(sl_str),
-                                'tp_price': float(tp_str),
+                                'sl_price': sl_price,
+                                'tp_price': tp_price,
                             }
                         continue
-                    raise  # Non-timeout error — propagate
+                    raise
 
             if result is None:
                 log.error(f"❌ SHORT ORDER FAILED after 3 retries: {bybit_symbol}")
                 return None
 
-            ret_code = result.get('retCode', -1)
-            if ret_code != 0:
-                log.error(f"❌ SHORT ORDER FAILED: {result.get('retMsg', 'Unknown error')}")
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            if not statuses or 'error' in str(statuses[0]).lower():
+                log.error(f"❌ SHORT ORDER FAILED: {statuses}")
                 return None
 
-            order_id = result['result'].get('orderId', '')
-            log.info(f"✅ SHORT ORDER PLACED: {bybit_symbol} orderId={order_id}")
+            filled = statuses[0].get('filled', statuses[0].get('resting', {}))
+            fill_price = float(filled.get('avgPx', 0)) if filled else 0
+            total_sz = float(filled.get('totalSz', qty)) if filled else qty
 
-            # Step 5: Verify — get the actual fill price
+            log.info(f"✅ SHORT ORDER PLACED: {bybit_symbol} fill_price={fill_price}")
+
             time.sleep(0.5)
-            fill_price = self._get_fill_price(bybit_symbol, order_id)
+            self._place_sl_tp(bybit_symbol, total_sz, True, sl_price, tp_price, price_precision)
+
+            if fill_price <= 0:
+                time.sleep(0.5)
+                pos = self.get_position(bybit_symbol)
+                if pos:
+                    fill_price = pos['entry_price']
 
             return {
                 'success': True,
-                'order_id': order_id,
+                'order_id': str(filled.get('oid', '')) if filled else '',
                 'fill_price': fill_price,
-                'qty': qty,
+                'qty': total_sz,
                 'leverage': leverage,
-                'sl_price': float(sl_str),
-                'tp_price': float(tp_str),
+                'sl_price': sl_price,
+                'tp_price': tp_price,
             }
 
         except Exception as e:
             log.error(f"❌ OPEN SHORT ERROR {bybit_symbol}: {e}")
             return None
 
-    def close_long(self, bybit_symbol: str, qty: float) -> Optional[Dict]:
-        """Close a LONG position by placing a market sell (with retry on timeout)."""
+    def _place_sl_tp(self, coin: str, qty: float, is_short: bool,
+                     sl_price: float, tp_price: float,
+                     price_precision: float):
+        """Place SL and TP trigger orders for an existing position."""
         try:
-            qty_str = str(qty)
+            decimals = self._count_decimals(price_precision) if price_precision > 0 else 6
+            sl_px = round(sl_price, decimals)
+            tp_px = round(tp_price, decimals)
+
+            # SL order: opposite side, reduce_only, trigger
+            # For LONG: sell at sl_price (market)
+            # For SHORT: buy at sl_price (market)
+            is_buy_for_exit = is_short  # SHORT exit = BUY, LONG exit = SELL
+
+            orders = [
+                {
+                    "coin": coin,
+                    "is_buy": is_buy_for_exit,
+                    "sz": qty,
+                    "limit_px": sl_px,
+                    "order_type": {"trigger": {"triggerPx": str(sl_px), "isMarket": True, "tpsl": "sl"}},
+                    "reduce_only": True,
+                },
+                {
+                    "coin": coin,
+                    "is_buy": is_buy_for_exit,
+                    "sz": qty,
+                    "limit_px": tp_px,
+                    "order_type": {"trigger": {"triggerPx": str(tp_px), "isMarket": True, "tpsl": "tp"}},
+                    "reduce_only": True,
+                },
+            ]
+
+            result = self.exchange.bulk_orders(orders, grouping="normalTpsl")
+            log.info(f"SL/TP set for {coin}: SL={sl_px} TP={tp_px}")
+            return result
+        except Exception as e:
+            log.error(f"Failed to set SL/TP for {coin}: {e}")
+
+    def close_long(self, bybit_symbol: str, qty: float) -> Optional[Dict]:
+        """Close a LONG position (partial or full)."""
+        try:
+            sz_decimals = self._get_sz_decimals(bybit_symbol)
+            qty = round(qty, sz_decimals)
 
             result = None
             for attempt in range(3):
                 try:
-                    result = self.session.place_order(
-                        category="linear",
-                        symbol=bybit_symbol,
-                        side="Sell",
-                        orderType="Market",
-                        qty=qty_str,
-                        reduceOnly=True,
-                        timeInForce="GTC",
-                    )
-                    break  # Success
+                    # market_close will close the full position
+                    # For partial close, use market_open with reduce_only via order()
+                    if qty > 0:
+                        # Partial close: SELL to reduce LONG
+                        result = self.exchange.order(
+                            bybit_symbol, False, qty,
+                            self.exchange._slippage_price(bybit_symbol, False, 0.01),
+                            order_type={"limit": {"tif": "Ioc"}},
+                            reduce_only=True
+                        )
+                    else:
+                        result = self.exchange.market_close(bybit_symbol)
+                    break
                 except Exception as close_err:
                     err_str = str(close_err)
-                    if ('timed out' in err_str or 'timeout' in err_str.lower() or
-                        'ConnectionError' in err_str) and attempt < 2:
+                    if ('timed out' in err_str or 'timeout' in err_str.lower()) and attempt < 2:
                         wait = (attempt + 1) * 3
                         log.warning(f"⏳ Close order timeout (attempt {attempt+1}/3). Checking in {wait}s...")
                         time.sleep(wait)
-                        # Check if close went through despite timeout
                         pos = self.get_position(bybit_symbol)
                         if pos is None or pos['size'] == 0:
                             log.info(f"✅ Position closed despite timeout!")
@@ -469,20 +387,18 @@ class BybitExecutor:
                 log.error(f"❌ CLOSE FAILED after 3 retries: {bybit_symbol}")
                 return None
 
-            ret_code = result.get('retCode', -1)
-            if ret_code != 0:
-                log.error(f"❌ CLOSE FAILED: {result.get('retMsg', '')}")
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            if statuses and 'error' in str(statuses[0]).lower():
+                log.error(f"❌ CLOSE FAILED: {statuses}")
                 return None
 
-            order_id = result['result'].get('orderId', '')
-            log.info(f"✅ POSITION CLOSED: {bybit_symbol} orderId={order_id}")
+            filled = statuses[0].get('filled', {}) if statuses else {}
+            fill_price = float(filled.get('avgPx', 0)) if filled else 0
 
-            time.sleep(0.5)
-            fill_price = self._get_fill_price(bybit_symbol, order_id)
-
+            log.info(f"✅ POSITION CLOSED: {bybit_symbol}")
             return {
                 'success': True,
-                'order_id': order_id,
+                'order_id': str(filled.get('oid', '')) if filled else '',
                 'fill_price': fill_price,
             }
 
@@ -491,31 +407,31 @@ class BybitExecutor:
             return None
 
     def close_short(self, bybit_symbol: str, qty: float) -> Optional[Dict]:
-        """Close a SHORT position by placing a market BUY (reduceOnly, with retry on timeout)."""
+        """Close a SHORT position (partial or full)."""
         try:
-            qty_str = str(qty)
+            sz_decimals = self._get_sz_decimals(bybit_symbol)
+            qty = round(qty, sz_decimals)
 
             result = None
             for attempt in range(3):
                 try:
-                    result = self.session.place_order(
-                        category="linear",
-                        symbol=bybit_symbol,
-                        side="Buy",
-                        orderType="Market",
-                        qty=qty_str,
-                        reduceOnly=True,
-                        timeInForce="GTC",
-                    )
-                    break  # Success
+                    if qty > 0:
+                        # Partial close: BUY to reduce SHORT
+                        result = self.exchange.order(
+                            bybit_symbol, True, qty,
+                            self.exchange._slippage_price(bybit_symbol, True, 0.01),
+                            order_type={"limit": {"tif": "Ioc"}},
+                            reduce_only=True
+                        )
+                    else:
+                        result = self.exchange.market_close(bybit_symbol)
+                    break
                 except Exception as close_err:
                     err_str = str(close_err)
-                    if ('timed out' in err_str or 'timeout' in err_str.lower() or
-                        'ConnectionError' in err_str) and attempt < 2:
+                    if ('timed out' in err_str or 'timeout' in err_str.lower()) and attempt < 2:
                         wait = (attempt + 1) * 3
                         log.warning(f"⏳ Close short timeout (attempt {attempt+1}/3). Checking in {wait}s...")
                         time.sleep(wait)
-                        # Check if close went through despite timeout
                         pos = self.get_position(bybit_symbol)
                         if pos is None or pos['size'] == 0:
                             log.info(f"✅ Short position closed despite timeout!")
@@ -527,20 +443,18 @@ class BybitExecutor:
                 log.error(f"❌ CLOSE SHORT FAILED after 3 retries: {bybit_symbol}")
                 return None
 
-            ret_code = result.get('retCode', -1)
-            if ret_code != 0:
-                log.error(f"❌ CLOSE SHORT FAILED: {result.get('retMsg', '')}")
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            if statuses and 'error' in str(statuses[0]).lower():
+                log.error(f"❌ CLOSE SHORT FAILED: {statuses}")
                 return None
 
-            order_id = result['result'].get('orderId', '')
-            log.info(f"✅ SHORT POSITION CLOSED: {bybit_symbol} orderId={order_id}")
+            filled = statuses[0].get('filled', {}) if statuses else {}
+            fill_price = float(filled.get('avgPx', 0)) if filled else 0
 
-            time.sleep(0.5)
-            fill_price = self._get_fill_price(bybit_symbol, order_id)
-
+            log.info(f"✅ SHORT POSITION CLOSED: {bybit_symbol}")
             return {
                 'success': True,
-                'order_id': order_id,
+                'order_id': str(filled.get('oid', '')) if filled else '',
                 'fill_price': fill_price,
             }
 
@@ -548,45 +462,38 @@ class BybitExecutor:
             log.error(f"❌ CLOSE SHORT ERROR {bybit_symbol}: {e}")
             return None
 
-    # ══════════════════════════════════════════════════════════
-    # POSITION MONITORING
-    # ══════════════════════════════════════════════════════════
-
     def get_position(self, bybit_symbol: str) -> Optional[Dict]:
-        """Get current position info from Bybit (with retry for timeout)."""
+        """Get current position info for a specific coin."""
         for attempt in range(3):
             try:
-                result = self.session.get_positions(
-                    category="linear",
-                    symbol=bybit_symbol,
-                )
+                state = self.info.user_state(self.address)
+                for ap in state.get('assetPositions', []):
+                    pos = ap['position']
+                    if pos['coin'] == bybit_symbol:
+                        szi = float(pos['szi'])
+                        if abs(szi) > 0:
+                            entry_px = float(pos.get('entryPx', 0) or 0)
+                            liq_px = float(pos.get('liquidationPx', 0) or 0)
+                            unrealized = float(pos.get('unrealizedPnl', 0) or 0)
+                            lev_info = pos.get('leverage', {})
+                            lev = int(lev_info.get('value', 1))
 
-                if result['retCode'] != 0:
-                    return None
-
-                positions = result['result']['list']
-                for pos in positions:
-                    size = float(pos.get('size', 0))
-                    if size > 0:
-                        return {
-                            'symbol': bybit_symbol,
-                            'side': pos.get('side', ''),
-                            'size': size,
-                            'entry_price': float(pos.get('avgPrice', 0)),
-                            'mark_price': float(pos.get('markPrice', 0)),
-                            'unrealized_pnl': float(pos.get('unrealisedPnl', 0)),
-                            'leverage': int(float(pos.get('leverage', 1))),
-                            'liq_price': float(pos.get('liqPrice', 0) or 0),
-                            'stop_loss': float(pos.get('stopLoss', 0) or 0),
-                            'take_profit': float(pos.get('takeProfit', 0) or 0),
-                        }
-
-                return None  # No position
-
+                            return {
+                                'symbol': bybit_symbol,
+                                'side': 'Sell' if szi < 0 else 'Buy',
+                                'size': abs(szi),
+                                'entry_price': entry_px,
+                                'mark_price': entry_px,  # HL doesn't return mark directly in user_state
+                                'unrealized_pnl': unrealized,
+                                'leverage': lev,
+                                'liq_price': liq_px,
+                                'stop_loss': 0.0,   # HL manages triggers separately
+                                'take_profit': 0.0,  # HL manages triggers separately
+                            }
+                return None
             except Exception as e:
                 err_str = str(e)
-                if ('timed out' in err_str or 'timeout' in err_str.lower() or
-                    'ConnectionError' in err_str) and attempt < 2:
+                if ('timed out' in err_str or 'timeout' in err_str.lower()) and attempt < 2:
                     wait = (attempt + 1) * 2
                     log.warning(f"⏳ get_position timeout {bybit_symbol} (attempt {attempt+1}/3). Retrying in {wait}s...")
                     time.sleep(wait)
@@ -596,36 +503,34 @@ class BybitExecutor:
         return None
 
     def get_all_positions(self) -> List[Dict]:
-        """Get all open positions (with retry for timeout)."""
+        """Get all open positions."""
         for attempt in range(3):
             try:
-                result = self.session.get_positions(
-                    category="linear",
-                    settleCoin="USDT",
-                )
-
-                if result['retCode'] != 0:
-                    return []
-
+                state = self.info.user_state(self.address)
                 positions = []
-                for pos in result['result']['list']:
-                    size = float(pos.get('size', 0))
-                    if size > 0:
+                for ap in state.get('assetPositions', []):
+                    pos = ap['position']
+                    szi = float(pos['szi'])
+                    if abs(szi) > 0:
+                        entry_px = float(pos.get('entryPx', 0) or 0)
+                        liq_px = float(pos.get('liquidationPx', 0) or 0)
+                        unrealized = float(pos.get('unrealizedPnl', 0) or 0)
+                        lev_info = pos.get('leverage', {})
+                        lev = int(lev_info.get('value', 1))
+
                         positions.append({
-                            'symbol': pos.get('symbol', ''),
-                            'side': pos.get('side', ''),
-                            'size': size,
-                            'entry_price': float(pos.get('avgPrice', 0)),
-                            'mark_price': float(pos.get('markPrice', 0)),
-                            'unrealized_pnl': float(pos.get('unrealisedPnl', 0)),
-                            'leverage': int(float(pos.get('leverage', 1))),
-                            'liq_price': float(pos.get('liqPrice', 0) or 0),
-                            'stop_loss': float(pos.get('stopLoss', 0) or 0),
-                            'take_profit': float(pos.get('takeProfit', 0) or 0),
+                            'symbol': pos['coin'],
+                            'side': 'Sell' if szi < 0 else 'Buy',
+                            'size': abs(szi),
+                            'entry_price': entry_px,
+                            'mark_price': entry_px,
+                            'unrealized_pnl': unrealized,
+                            'leverage': lev,
+                            'liq_price': liq_px,
+                            'stop_loss': 0.0,
+                            'take_profit': 0.0,
                         })
-
                 return positions
-
             except Exception as e:
                 err_str = str(e).lower()
                 if ('timed out' in err_str or 'timeout' in err_str) and attempt < 2:
@@ -639,34 +544,63 @@ class BybitExecutor:
 
     def update_sl_tp(self, bybit_symbol: str, sl_price: float = None,
                      tp_price: float = None) -> bool:
-        """Update SL/TP on an existing position (server-side, with retry)."""
+        """Update SL/TP on an existing position.
+
+        Strategy: Cancel existing trigger orders, place new ones.
+        This is needed because Hyperliquid trigger orders are separate orders,
+        not position attributes like on Bybit.
+        """
         for attempt in range(3):
             try:
-                params = {
-                    'category': 'linear',
-                    'symbol': bybit_symbol,
-                    'slTriggerBy': 'MarkPrice',
-                    'tpTriggerBy': 'MarkPrice',
-                }
-                if sl_price is not None:
-                    params['stopLoss'] = str(round(sl_price, 8))
-                if tp_price is not None:
-                    params['takeProfit'] = str(round(tp_price, 8))
+                # First, cancel existing open trigger orders for this coin
+                open_orders = self.info.open_orders(self.address)
+                for order in open_orders:
+                    if order.get('coin') == bybit_symbol:
+                        try:
+                            self.exchange.cancel(bybit_symbol, order['oid'])
+                        except Exception:
+                            pass  # Best effort cancel
 
-                result = self.session.set_trading_stop(**params)
-
-                if result.get('retCode', -1) == 0:
-                    log.info(f"SL/TP updated for {bybit_symbol}: "
-                             f"SL={sl_price} TP={tp_price}")
-                    return True
-                else:
-                    log.error(f"Update SL/TP failed: {result.get('retMsg', '')}")
+                # Get current position to know size and side
+                pos = self.get_position(bybit_symbol)
+                if not pos:
+                    log.warning(f"No position found for {bybit_symbol}, skip SL/TP update")
                     return False
+
+                is_short = (pos['side'] == 'Sell')
+                qty = pos['size']
+                is_buy_for_exit = is_short  # Exit side
+
+                orders = []
+                if sl_price is not None:
+                    sl_px = round(sl_price, 8)
+                    orders.append({
+                        "coin": bybit_symbol,
+                        "is_buy": is_buy_for_exit,
+                        "sz": qty,
+                        "limit_px": sl_px,
+                        "order_type": {"trigger": {"triggerPx": str(sl_px), "isMarket": True, "tpsl": "sl"}},
+                        "reduce_only": True,
+                    })
+                if tp_price is not None:
+                    tp_px = round(tp_price, 8)
+                    orders.append({
+                        "coin": bybit_symbol,
+                        "is_buy": is_buy_for_exit,
+                        "sz": qty,
+                        "limit_px": tp_px,
+                        "order_type": {"trigger": {"triggerPx": str(tp_px), "isMarket": True, "tpsl": "tp"}},
+                        "reduce_only": True,
+                    })
+
+                if orders:
+                    self.exchange.bulk_orders(orders, grouping="normalTpsl")
+                    log.info(f"SL/TP updated for {bybit_symbol}: SL={sl_price} TP={tp_price}")
+                return True
 
             except Exception as e:
                 err_str = str(e)
-                if ('timed out' in err_str or 'timeout' in err_str.lower() or
-                    'ConnectionError' in err_str) and attempt < 2:
+                if ('timed out' in err_str or 'timeout' in err_str.lower()) and attempt < 2:
                     wait = (attempt + 1) * 3
                     log.warning(f"⏳ update_sl_tp timeout (attempt {attempt+1}/3). Retrying in {wait}s...")
                     time.sleep(wait)
@@ -674,36 +608,6 @@ class BybitExecutor:
                 log.error(f"Update SL/TP error {bybit_symbol}: {e}")
                 return False
         return False
-
-    # ══════════════════════════════════════════════════════════
-    # HELPERS
-    # ══════════════════════════════════════════════════════════
-
-    def _get_fill_price(self, bybit_symbol: str, order_id: str) -> float:
-        """Get the actual fill price of an order."""
-        try:
-            result = self.session.get_order_history(
-                category="linear",
-                symbol=bybit_symbol,
-                orderId=order_id,
-            )
-            if result['retCode'] == 0 and result['result']['list']:
-                order = result['result']['list'][0]
-                avg_price = float(order.get('avgPrice', 0))
-                if avg_price > 0:
-                    return avg_price
-        except Exception:
-            pass
-
-        # Fallback: get from position
-        try:
-            pos = self.get_position(bybit_symbol)
-            if pos:
-                return pos['entry_price']
-        except Exception:
-            pass
-
-        return 0.0
 
     @staticmethod
     def _count_decimals(precision: float) -> int:

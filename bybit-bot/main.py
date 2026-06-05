@@ -26,10 +26,10 @@ from fastapi.templating import Jinja2Templates
 import uvicorn
 
 from config import (
-    BYBIT_API_KEY, BYBIT_API_SECRET, TG_TOKEN, TG_CHAT_ID,
+    HL_PRIVATE_KEY, HL_WALLET_ADDRESS, TG_TOKEN, TG_CHAT_ID,
     TIMEFRAMES, PRIMARY_TIMEFRAME, SCAN_INTERVAL_SEC,
     POSITION_CHECK_SEC, MAX_OPEN_POSITIONS, MAX_SHORT_POSITIONS, DATA_DIR, WEB_PORT,
-    BYBIT_TESTNET, ACCUM_MAX_RANGE_PCT, VOLUME_BREAKOUT_MULT,
+    HL_TESTNET, ACCUM_MAX_RANGE_PCT, VOLUME_BREAKOUT_MULT,
     SL_BUFFER_PCT, DEFAULT_RR_RATIO, TRIPLE_SCREEN_ENABLED,
     MAX_ALPHA_COINS, MARKETCAP_TOP_N, MARKETCAP_CACHE_SEC,
     MIN_EQUITY_FOR_TRADE, FAILED_SYMBOL_COOLDOWN,
@@ -39,7 +39,7 @@ import db
 from scanner import MarketScanner
 from strategy import analyze, analyze_lh_short, diagnose_analyze, is_pucuk, is_pump_candle, calc_atr, is_bullish_structure
 from risk_manager import calculate_leverage, calculate_position_size, calculate_trailing_sl, calculate_trailing_sl_short
-from executor import BybitExecutor
+from executor import HyperliquidExecutor
 
 # ══════════════════════════════════════════════════════════════
 # LOGGING
@@ -364,8 +364,8 @@ async def tg_close(session: aiohttp.ClientSession, pos: Dict, reason: str):
 # ══════════════════════════════════════════════════════════════
 # MAIN SCAN LOOP
 # ══════════════════════════════════════════════════════════════
-async def sync_positions_from_bybit(executor: BybitExecutor, session):
-    """Sync open positions from Bybit into DB.
+async def sync_positions_from_exchange(executor: HyperliquidExecutor, session):
+    """Sync open positions from Hyperliquid into DB.
     Catches 'orphaned' positions that were opened but not recorded
     (e.g. due to crash after order but before DB insert).
     """
@@ -376,7 +376,7 @@ async def sync_positions_from_bybit(executor: BybitExecutor, session):
 
         synced = 0
         for pos in bybit_positions:
-            symbol = pos['symbol']  # e.g. SOLUSDT
+            symbol = pos['symbol']  # e.g. SOL, ETH (Hyperliquid coin name)
             if symbol not in db_symbols:
                 # Orphaned position — register in DB
                 entry_price = pos['entry_price']
@@ -386,9 +386,9 @@ async def sync_positions_from_bybit(executor: BybitExecutor, session):
                 tp = pos['take_profit']
                 bybit_side = pos.get('side', 'Buy')  # 'Buy' = LONG, 'Sell' = SHORT
 
-                # Convert SOLUSDT → SOL/USDT:USDT
-                base = symbol.replace('USDT', '')
-                ccxt_symbol = f"{base}/USDT:USDT"
+                # On Hyperliquid, symbol IS the coin name (e.g., 'SOL')
+                base = symbol
+                ccxt_symbol = symbol  # No conversion needed
 
                 margin = (entry_price * size) / leverage if leverage > 0 else 0
 
@@ -413,19 +413,19 @@ async def sync_positions_from_bybit(executor: BybitExecutor, session):
 
                 await tg_send(session,
                     f"🔄 <b>POSITION SYNCED</b>\n"
-                    f"📊 {symbol} ({direction_label} dari Bybit)\n"
+                    f"📊 {symbol} ({direction_label} dari Hyperliquid)\n"
                     f"💰 Entry: {entry_price:.4f}\n"
                     f"🛑 SL: {sl:.4f}\n"
                     f"🎯 TP: {tp:.4f}\n"
                     f"📦 Qty: {size} | Lev: {leverage}x\n"
-                    f"ℹ️ Posisi ini sudah ada di Bybit tapi belum tercatat"
+                    f"ℹ️ Posisi ini sudah ada di Hyperliquid tapi belum tercatat"
                 )
                 synced += 1
 
         if synced > 0:
-            log.info(f"🔄 Synced {synced} orphaned positions from Bybit")
+            log.info(f"🔄 Synced {synced} orphaned positions from Hyperliquid")
         else:
-            log.info(f"🔄 Position sync: {len(bybit_positions)} on Bybit, "
+            log.info(f"🔄 Position sync: {len(bybit_positions)} on Hyperliquid, "
                      f"{len(db_open)} in DB — all matched")
 
         # Auto-fix: correct side for existing positions that have wrong direction
@@ -466,7 +466,7 @@ async def tg_poll_loop(session: aiohttp.ClientSession):
         await asyncio.sleep(2)
 
 
-async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
+async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
     """Main scanning loop — runs every SCAN_INTERVAL_SEC."""
     log.info("🚀 Scan loop started")
     already_traded = set()  # Symbols traded this session
@@ -481,9 +481,9 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
         # Startup notification
         equity = await asyncio.to_thread(executor.get_equity)
         await tg_send(session,
-            f"🤖 <b>Bybit Alpha Bot Started</b>\n"
+            f"🤖 <b>Hyperliquid Alpha Bot Started</b>\n"
             f"💰 Equity: ${equity:.2f}\n"
-            f"⚙️ Testnet: {BYBIT_TESTNET}\n"
+            f"⚙️ Testnet: {HL_TESTNET}\n"
             f"📊 Timeframes: {', '.join(TIMEFRAMES)}\n"
             f"🎯 Strategy: Kalimasada v7 (BTC H4 13EMA Filter)\n"
             f"📈 LONG: Ascending Triangle (BTC > H4 13EMA)\n"
@@ -491,8 +491,8 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
             f"📅 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
         )
 
-        # Sync orphaned positions from Bybit
-        await sync_positions_from_bybit(executor, session)
+        # Sync orphaned positions from Hyperliquid
+        await sync_positions_from_exchange(executor, session)
 
         # Mark all open positions as already traded
         for p in db.get_open_positions():
@@ -752,7 +752,7 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
                 WEB.last_scan_ms = scan_ms
                 WEB.stats = db.get_stats()
                 WEB.recent_trades = db.get_recent_trades(20)  # Reduced from 100 → 20
-                # Get live data from Bybit to merge with DB positions
+                # Get live data from Hyperliquid to merge with DB positions
                 db_open = db.get_open_positions()
                 bybit_open = await asyncio.to_thread(executor.get_all_positions)
                 bybit_map = {p['symbol']: p for p in bybit_open}
@@ -802,7 +802,7 @@ async def scan_loop(scanner: MarketScanner, executor: BybitExecutor):
 # ══════════════════════════════════════════════════════════════
 # POSITION MONITOR LOOP
 # ══════════════════════════════════════════════════════════════
-async def monitor_loop(executor: BybitExecutor):
+async def monitor_loop(executor: HyperliquidExecutor):
     """Monitor open positions for trailing stop updates and closed positions."""
     log.info("👀 Position monitor started")
     await asyncio.sleep(10)  # Wait for first scan
@@ -962,16 +962,15 @@ async def monitor_loop(executor: BybitExecutor):
             await asyncio.sleep(POSITION_CHECK_SEC)
 
 
-def _get_last_close_price(executor: BybitExecutor, bybit_symbol: str) -> float:
+def _get_last_close_price(executor: HyperliquidExecutor, bybit_symbol: str) -> float:
     """Try to get the fill price of the last closed trade."""
     try:
-        result = executor.session.get_closed_pnl(
-            category="linear",
-            symbol=bybit_symbol,
-            limit=1,
-        )
-        if result['retCode'] == 0 and result['result']['list']:
-            return float(result['result']['list'][0].get('avgExitPrice', 0))
+        # Hyperliquid: check user fills for exit price
+        fills = executor.info.user_fills(executor.address)
+        # Find the most recent fill for this coin
+        for fill in reversed(fills):
+            if fill.get('coin') == bybit_symbol:
+                return float(fill.get('px', 0))
     except Exception:
         pass
     return 0.0
@@ -984,13 +983,13 @@ def _get_last_close_price(executor: BybitExecutor, bybit_symbol: str) -> float:
 async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle."""
     log.info("=" * 60)
-    log.info("🤖 BYBIT ALPHA BOT — Kalimasada v6 Ascending Triangle")
+    log.info("🤖 HYPERLIQUID ALPHA BOT — Kalimasada v7 Ascending Triangle")
     log.info("=" * 60)
 
     # Validate config
-    if not BYBIT_API_KEY or not BYBIT_API_SECRET:
-        log.error("❌ BYBIT_API_KEY and BYBIT_API_SECRET required!")
-        log.error("   Set them as environment variables and restart.")
+    if not HL_PRIVATE_KEY:
+        log.error("❌ HL_PRIVATE_KEY required!")
+        log.error("   Set HL_PRIVATE_KEY (and optionally HL_WALLET_ADDRESS) as env vars.")
         # Don't exit — dashboard still works for config debugging
         WEB.status = 'NO_API_KEY'
         yield
@@ -1001,7 +1000,7 @@ async def lifespan(app: FastAPI):
 
     # Init scanner and executor
     scanner = MarketScanner()
-    executor = BybitExecutor()
+    executor = HyperliquidExecutor()
 
     # Load markets with robust retry loop
     for attempt in range(1, 11):
@@ -1035,7 +1034,7 @@ async def lifespan(app: FastAPI):
     log.info("Bot shutdown complete")
 
 
-app = FastAPI(title="Bybit Alpha Bot", lifespan=lifespan)
+app = FastAPI(title="Hyperliquid Alpha Bot", lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
 
 
@@ -1058,7 +1057,7 @@ async def api_state():
         'alpha_coins': WEB.alpha_coins[:30],
         'signals_found': WEB.signals_found,
         'recent_trades': WEB.recent_trades,
-        'testnet': BYBIT_TESTNET,
+        'testnet': HL_TESTNET,
         'max_positions': MAX_OPEN_POSITIONS,
         'timeframes': TIMEFRAMES,
     })
@@ -1082,23 +1081,28 @@ async def api_diagnose():
         results = []
         failure_counts = {}
 
-        import ccxt
-        ex = ccxt.bybit({
-            'apiKey': BYBIT_API_KEY, 'secret': BYBIT_API_SECRET,
-            'options': {'defaultType': 'swap'},
-            'urls': {
-                'api': {
-                    'public': 'https://api.bytick.com',
-                    'private': 'https://api.bytick.com',
-                }
-            },
-        })
+        # Use the scanner's fetch_ohlcv (Hyperliquid Info API)
+        from hyperliquid.info import Info
+        from hyperliquid.utils.constants import MAINNET_API_URL, TESTNET_API_URL
+        info = Info(TESTNET_API_URL if HL_TESTNET else MAINNET_API_URL, skip_ws=True)
+
+        # Create a temporary scanner for fetching
+        temp_scanner = MarketScanner()
+        if not temp_scanner._markets_loaded:
+            temp_scanner.load_markets()
 
         for coin in coins:
             for tf in TIMEFRAMES:
                 try:
-                    ohlcv = ex.fetch_ohlcv(coin['symbol'], tf, limit=150)
-                    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                    df = temp_scanner.fetch_ohlcv(coin['symbol'], tf, limit=150)
+                    if df is None or len(df) < 20:
+                        results.append({
+                            'coin': coin.get('base', coin['symbol']),
+                            'tf': tf,
+                            'reason': 'ERROR: Not enough candle data',
+                            'passed': False,
+                        })
+                        continue
 
                     reason = diagnose_analyze(df, coin['symbol'], tf)
                     results.append({

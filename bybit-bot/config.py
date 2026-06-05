@@ -1,15 +1,16 @@
 """
-Bybit Crypto Algo Bot — Configuration
+Hyperliquid Crypto Algo Bot — Configuration
 All parameters in one place. No magic numbers anywhere else.
+Migrated from Bybit → Hyperliquid DEX.
 """
 import os
 
 # ══════════════════════════════════════════════════════════════
-# BYBIT API
+# HYPERLIQUID DEX
 # ══════════════════════════════════════════════════════════════
-BYBIT_API_KEY    = os.environ.get('BYBIT_API_KEY', '')
-BYBIT_API_SECRET = os.environ.get('BYBIT_API_SECRET', '')
-BYBIT_TESTNET    = os.environ.get('BYBIT_TESTNET', 'false').lower() == 'true'
+HL_PRIVATE_KEY     = os.environ.get('HL_PRIVATE_KEY', '')       # Agent wallet private key (hex)
+HL_WALLET_ADDRESS  = os.environ.get('HL_WALLET_ADDRESS', '')    # Your wallet address (0x...)
+HL_TESTNET         = os.environ.get('HL_TESTNET', 'false').lower() == 'true'
 
 # ══════════════════════════════════════════════════════════════
 # TELEGRAM (reuse dari Polymarket bot)
@@ -118,39 +119,10 @@ MIN_VOLUME_24H     = 600_000      # Volume 24h minimal $600K (scan lebih banyak 
 MAX_VOLUME_24H     = 250_000_000  # Volume 24h max $250M (skip mega cap BTC/ETH/SOL)
 MAX_SPREAD_PCT     = 0.15      # Spread max 0.15%
 MIN_PRICE          = 0.0001    # Harga minimum (filter dust coins)
-MIN_NOTIONAL_USDT  = 5.5       # Bybit minimum order $5 USDT (tambah buffer 10%)
-BLACKLIST_SYMBOLS  = [         # Koin yang di-skip (stablecoins, delisted, commodity, stock)
-    'USDC/USDT:USDT', 'DAI/USDT:USDT', 'TUSD/USDT:USDT',
-    'BUSD/USDT:USDT', 'FDUSD/USDT:USDT',
-    # ── Commodities & Metals ──
-    'XAU/USDT:USDT',             # Gold
-    'XAG/USDT:USDT',             # Silver
-    'CL/USDT:USDT',              # Crude Oil
-    'NG/USDT:USDT',              # Natural Gas
-    'HG/USDT:USDT',              # Copper
-    'PL/USDT:USDT',              # Platinum
-    # ── Stocks (butuh agreement + bukan crypto) ──
-    'NVDA/USDT:USDT',            # Nvidia
-    'MU/USDT:USDT',              # Micron
-    'AMDSTOCK/USDT:USDT',        # AMD
-    'SOXL/USDT:USDT',            # Semiconductor ETF
-    'NBIS/USDT:USDT',            # Nebius
-    'SNDK/USDT:USDT',            # SanDisk/WD
-    'ARM/USDT:USDT',             # ARM Holdings
-    'EWY/USDT:USDT',             # iShares South Korea
-    'INTC/USDT:USDT',            # Intel
-    'CBRS/USDT:USDT',            # Cobre Panama
-    'DRAM/USDT:USDT',            # Dram stock
-    'QCOM/USDT:USDT',            # Qualcomm
-    'QQQ/USDT:USDT',             # Nasdaq ETF
-    'RKLB/USDT:USDT',            # Rocket Lab
-    'SPCX/USDT:USDT',            # SPCX ETF
-    'MSFT/USDT:USDT',            # Microsoft
-    'CRCL/USDT:USDT',            # Circle
-    'MRVL/USDT:USDT',            # Marvell
-    'HOOD/USDT:USDT',            # Robinhood
-    'WDC/USDT:USDT',             # Western Digital
-    'DJT/USDT:USDT',             # Dow Jones
+MIN_NOTIONAL_USDT  = 10.0      # Hyperliquid minimum order $10 USDT
+BLACKLIST_SYMBOLS  = [         # Koin yang di-skip (stablecoins, non-crypto)
+    # Hyperliquid uses plain coin names like 'BTC', 'ETH', etc.
+    # Add any non-crypto perps that appear on Hyperliquid here
 ]
 
 # ══════════════════════════════════════════════════════════════
@@ -159,7 +131,7 @@ BLACKLIST_SYMBOLS  = [         # Koin yang di-skip (stablecoins, delisted, commo
 SCAN_INTERVAL_SEC     = 60     # Scan setiap 1 menit (Real-time momentum)
 POSITION_CHECK_SEC    = 60     # Cek posisi setiap 1 menit
 MAX_ALPHA_COINS       = 30     # Max koin alpha yang di-deep scan
-RATE_LIMIT_DELAY      = 0.35   # Delay antar API call (350ms) untuk hindari rate limit
+RATE_LIMIT_DELAY      = 0.15   # Delay antar API call (150ms) — Hyperliquid lebih toleran
 
 # Market Cap Filter (CoinGecko)
 MARKETCAP_TOP_N       = 50     # Hanya exclude top 50 (scan koin rank 51+)

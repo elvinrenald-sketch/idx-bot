@@ -28,7 +28,7 @@ import uvicorn
 from config import (
     HL_PRIVATE_KEY, HL_WALLET_ADDRESS, TG_TOKEN, TG_CHAT_ID,
     TIMEFRAMES, PRIMARY_TIMEFRAME, SCAN_INTERVAL_SEC,
-    POSITION_CHECK_SEC, MAX_OPEN_POSITIONS, MAX_SHORT_POSITIONS, DATA_DIR, WEB_PORT,
+    POSITION_CHECK_SEC, MAX_OPEN_POSITIONS, DATA_DIR, WEB_PORT,
     HL_TESTNET, ACCUM_MAX_RANGE_PCT, VOLUME_BREAKOUT_MULT,
     SL_BUFFER_PCT, DEFAULT_RR_RATIO, TRIPLE_SCREEN_ENABLED,
     MAX_ALPHA_COINS, MARKETCAP_TOP_N, MARKETCAP_CACHE_SEC,
@@ -348,14 +348,38 @@ async def tg_close(session: aiohttp.ClientSession, pos: Dict, reason: str):
     """Send close notification to Telegram."""
     pnl = pos.get('pnl', 0)
     pnl_pct = pos.get('pnl_pct', 0)
-    emoji = '✅' if pnl >= 0 else '❌'
+    entry = pos.get('entry_price', 0)
+    exit_px = pos.get('exit_price', 0)
+    qty = pos.get('qty', 0)
+    leverage = pos.get('leverage', 1)
+    side = pos.get('side', 'Buy')
+    direction = '📉 SHORT' if side == 'Sell' else '📈 LONG'
+    margin = pos.get('margin_used', 0)
+
+    if pnl >= 0:
+        emoji = '✅'
+        result = 'PROFIT'
+    else:
+        emoji = '❌'
+        result = 'LOSS'
+
+    # Calculate ROI on margin
+    roi_on_margin = (pnl / margin * 100) if margin > 0 else pnl_pct
+
     text = (
-        f"{emoji} <b>POSITION CLOSED</b>\n"
+        f"{emoji} <b>POSITION CLOSED — {result}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 {pos.get('bybit_symbol', '')}\n"
-        f"💰 Entry: {pos.get('entry_price', 0):.6f}\n"
-        f"💰 Exit: {pos.get('exit_price', 0):.6f}\n"
-        f"📊 PnL: ${pnl:.4f} ({pnl_pct:+.2f}%)\n"
+        f"📊 <b>{pos.get('bybit_symbol', '')}</b> {direction}\n"
+        f"⚡ Leverage: {leverage}x\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Entry: <code>{entry:.6f}</code>\n"
+        f"💰 Exit: <code>{exit_px:.6f}</code>\n"
+        f"📦 Qty: {qty}\n"
+        f"💵 Margin: ${margin:.2f}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 <b>PnL: ${pnl:.4f} ({pnl_pct:+.2f}%)</b>\n"
+        f"📈 ROI: {roi_on_margin:+.2f}%\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📝 Reason: {reason}"
     )
     await tg_send(session, text)
@@ -525,12 +549,11 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
                     await asyncio.sleep(60)
                     continue
 
-                # ── Step 2: Check how many slots available per direction ──────
+                # ── Step 2: Check how many slots available (TOTAL) ──────
                 open_count = db.count_open()
                 long_count = db.count_open_by_side('Buy')
                 short_count = db.count_open_by_side('Sell')
-                slots = MAX_OPEN_POSITIONS - long_count  # LONG slots
-                short_slots = MAX_SHORT_POSITIONS - short_count  # SHORT slots
+                total_slots = MAX_OPEN_POSITIONS - open_count  # TOTAL slots (LONG + SHORT gabungan)
                 open_symbols = db.get_open_symbols()
 
                  # ── Step 3: ALWAYS scan top coins for watchlist ──────
@@ -549,8 +572,8 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
                 if equity < MIN_EQUITY_FOR_TRADE:
                     log.warning(f"Equity ${equity:.2f} < min ${MIN_EQUITY_FOR_TRADE}. Skipping trade scan.")
                     WEB.status = 'LOW_EQUITY'
-                elif (btc_bias == 'LONG' and slots <= 0) or (btc_bias == 'SHORT' and short_slots <= 0):
-                    log.info(f"Max positions reached (LONG:{long_count}/{MAX_OPEN_POSITIONS} SHORT:{short_count}/{MAX_SHORT_POSITIONS}). Monitoring only.")
+                elif total_slots <= 0:
+                    log.info(f"Max positions reached ({open_count}/{MAX_OPEN_POSITIONS} total, L:{long_count} S:{short_count}). Monitoring only.")
                     WEB.status = 'MAX_POSITIONS'
                 else:
 
@@ -635,7 +658,7 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
                                 signals.append(signal)
                                 break
 
-                        if len(signals) >= (slots if btc_bias == 'LONG' else short_slots):
+                        if len(signals) >= total_slots:
                             break
 
                     WEB.signals_found = len(signals)
@@ -643,17 +666,17 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
                     # ── Step 5: Execute trades ──────────────────
                     for signal in signals:
                         direction = signal.get('direction', 'LONG')
-                        if direction == 'SHORT' and short_slots <= 0:
-                            break
-                        elif direction == 'LONG' and slots <= 0:
+                        if total_slots <= 0:
                             break
 
                         try:
-                            # Calculate leverage
+                            # Get market info and clamp leverage to max allowed by exchange
+                            minfo = signal['market_info']
+                            max_lev = minfo.get('max_leverage', 10)
                             leverage = calculate_leverage(signal['atr_pct'])
+                            leverage = min(leverage, max_lev)
 
                             # Calculate position size
-                            minfo = signal['market_info']
                             sizing = calculate_position_size(
                                 equity=equity,
                                 entry_price=signal['entry_price'],
@@ -719,10 +742,7 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
                                 )
 
                                 already_traded.add(signal['bybit_symbol'])
-                                if direction == 'SHORT':
-                                    short_slots -= 1
-                                else:
-                                    slots -= 1
+                                total_slots -= 1
 
                                 # Telegram notification
                                 await tg_signal(session, signal, sizing, result)
@@ -787,7 +807,7 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
                 log.info(f"[SCAN #{WEB.scans}] {scan_ms}ms | "
                          f"Mode:{bias_label} "
                          f"Alpha:{len(WEB.alpha_coins)} Signals:{WEB.signals_found} "
-                         f"Open:L{long_count}/{MAX_OPEN_POSITIONS} S{short_count}/{MAX_SHORT_POSITIONS} "
+                         f"Open:{open_count}/{MAX_OPEN_POSITIONS}(L{long_count}/S{short_count}) "
                          f"Equity:${equity:.2f}")
 
             except Exception as scan_err:
@@ -965,14 +985,25 @@ async def monitor_loop(executor: HyperliquidExecutor):
 def _get_last_close_price(executor: HyperliquidExecutor, bybit_symbol: str) -> float:
     """Try to get the fill price of the last closed trade."""
     try:
-        # Hyperliquid: check user fills for exit price
-        fills = executor.info.user_fills(executor.address)
+        # Try user_fills_by_time first (last 24 hours) — lighter API call
+        start_time = int((time.time() - 86400) * 1000)
+        try:
+            fills = executor.info.user_fills_by_time(executor.address, start_time)
+        except Exception:
+            # Fallback to user_fills if user_fills_by_time not available
+            fills = executor.info.user_fills(executor.address)
+
         # Find the most recent fill for this coin
         for fill in reversed(fills):
             if fill.get('coin') == bybit_symbol:
-                return float(fill.get('px', 0))
-    except Exception:
-        pass
+                px = float(fill.get('px', 0))
+                side = fill.get('side', '')
+                sz = fill.get('sz', '0')
+                log.info(f"📊 Last fill for {bybit_symbol}: px={px} side={side} sz={sz}")
+                if px > 0:
+                    return px
+    except Exception as e:
+        log.warning(f"Failed to get last close price for {bybit_symbol}: {e}")
     return 0.0
 
 

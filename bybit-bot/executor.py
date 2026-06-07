@@ -329,7 +329,7 @@ class HyperliquidExecutor:
                     "is_buy": is_buy_for_exit,
                     "sz": qty,
                     "limit_px": sl_px,
-                    "order_type": {"trigger": {"triggerPx": str(sl_px), "isMarket": True, "tpsl": "sl"}},
+                    "order_type": {"trigger": {"triggerPx": float(sl_px), "isMarket": True, "tpsl": "sl"}},
                     "reduce_only": True,
                 },
                 {
@@ -337,12 +337,12 @@ class HyperliquidExecutor:
                     "is_buy": is_buy_for_exit,
                     "sz": qty,
                     "limit_px": tp_px,
-                    "order_type": {"trigger": {"triggerPx": str(tp_px), "isMarket": True, "tpsl": "tp"}},
+                    "order_type": {"trigger": {"triggerPx": float(tp_px), "isMarket": True, "tpsl": "tp"}},
                     "reduce_only": True,
                 },
             ]
 
-            result = self.exchange.bulk_orders(orders, grouping="normalTpsl")
+            result = self.exchange.bulk_orders(orders, grouping="positionTpsl")
             log.info(f"SL/TP set for {coin}: SL={sl_px} TP={tp_px}")
             return result
         except Exception as e:
@@ -579,7 +579,7 @@ class HyperliquidExecutor:
                         "is_buy": is_buy_for_exit,
                         "sz": qty,
                         "limit_px": sl_px,
-                        "order_type": {"trigger": {"triggerPx": str(sl_px), "isMarket": True, "tpsl": "sl"}},
+                        "order_type": {"trigger": {"triggerPx": float(sl_px), "isMarket": True, "tpsl": "sl"}},
                         "reduce_only": True,
                     })
                 if tp_price is not None:
@@ -589,12 +589,12 @@ class HyperliquidExecutor:
                         "is_buy": is_buy_for_exit,
                         "sz": qty,
                         "limit_px": tp_px,
-                        "order_type": {"trigger": {"triggerPx": str(tp_px), "isMarket": True, "tpsl": "tp"}},
+                        "order_type": {"trigger": {"triggerPx": float(tp_px), "isMarket": True, "tpsl": "tp"}},
                         "reduce_only": True,
                     })
 
                 if orders:
-                    self.exchange.bulk_orders(orders, grouping="normalTpsl")
+                    self.exchange.bulk_orders(orders, grouping="positionTpsl")
                     log.info(f"SL/TP updated for {bybit_symbol}: SL={sl_price} TP={tp_price}")
                 return True
 

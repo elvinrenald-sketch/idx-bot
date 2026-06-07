@@ -100,6 +100,7 @@ class MarketScanner:
                     'price_precision': price_precision,
                     'sz_decimals': sz_decimals,
                     'asset_index': i,
+                    'max_leverage': asset_info.get('maxLeverage', 10),
                 }
             
             self._markets_loaded = True
@@ -489,8 +490,6 @@ class MarketScanner:
         result = {}
         for tf in TIMEFRAMES:
             result[tf] = self.fetch_ohlcv(symbol, tf)
-        result['1d'] = self.fetch_ohlcv(symbol, '1d', limit=50)
-        result['15m'] = self.fetch_ohlcv(symbol, '15m', limit=100)
         return result
 
     def close(self):

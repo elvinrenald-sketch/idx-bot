@@ -24,6 +24,7 @@ from config import (
     DECOUPLING_THRESHOLD, DECOUPLING_WINDOW_H,
     NEW_LISTING_DAYS,
     MARKETCAP_TOP_N, MARKETCAP_CACHE_SEC,
+    SCAN_COIN_LIMIT,
 )
 
 log = logging.getLogger('scanner')
@@ -131,10 +132,10 @@ class MarketScanner:
             if df is None or len(df) < 14:
                 return 'NEUTRAL'
 
-            # Calculate 13 EMA
-            ema13 = df['close'].ewm(span=13, adjust=False).mean()
+            # Calculate 9 EMA
+            ema9 = df['close'].ewm(span=9, adjust=False).mean()
             last_close = df['close'].iloc[-1]
-            last_ema = ema13.iloc[-1]
+            last_ema = ema9.iloc[-1]
 
             if last_close > last_ema:
                 return 'LONG'
@@ -388,7 +389,7 @@ class MarketScanner:
                 continue
 
         candidates.sort(key=lambda x: x['volume_24h'], reverse=True)
-        result = candidates[:60]
+        result = candidates[:SCAN_COIN_LIMIT]
 
         log.info(f"Volume scan: {len(candidates)} candidates → top {len(result)} by volume "
                  f"(skipped {mcap_filtered} coins because they are IN top-{MARKETCAP_TOP_N} mcap)")

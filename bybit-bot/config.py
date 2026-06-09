@@ -116,6 +116,7 @@ ATR_SL_MULT_DEFAULT = 1.5  # Fallback jika TF tidak dikenali
 # ══════════════════════════════════════════════════════════════
 MIN_VOLUME_24H     = 600_000      # Volume 24h minimal $600K (scan lebih banyak koin)
 MAX_VOLUME_24H     = 250_000_000  # Volume 24h max $250M (skip mega cap BTC/ETH/SOL)
+SCAN_COIN_LIMIT    = 150          # Batas maksimal koin yang di-scan (150 = menscan seluruh perps aktif)
 MAX_SPREAD_PCT     = 0.15      # Spread max 0.15%
 MIN_PRICE          = 0.0001    # Harga minimum (filter dust coins)
 MIN_NOTIONAL_USDT  = 10.0      # Hyperliquid minimum order $10 USDT

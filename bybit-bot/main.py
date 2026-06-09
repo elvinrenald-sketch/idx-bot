@@ -33,7 +33,7 @@ from config import (
     SL_BUFFER_PCT, DEFAULT_RR_RATIO, TRIPLE_SCREEN_ENABLED,
     MAX_ALPHA_COINS, MARKETCAP_TOP_N, MARKETCAP_CACHE_SEC,
     MIN_EQUITY_FOR_TRADE, FAILED_SYMBOL_COOLDOWN,
-    PARTIAL_TP_RATIO, PARTIAL_TP_PCT
+    PARTIAL_TP_RATIO, PARTIAL_TP_PCT, SCAN_COIN_LIMIT
 )
 import db
 from scanner import MarketScanner
@@ -171,10 +171,10 @@ async def tg_poll_updates(session: aiohttp.ClientSession):
                             _manual_bias = ''
                             save_manual_bias('')
                             reply = (
-                                '✅ <b>Mode: 🤖 AUTO (BTC H4 13 EMA)</b>\n\n'
+                                '✅ <b>Mode: 🤖 AUTO (BTC H4 9 EMA)</b>\n\n'
                                 '🔍 Bot otomatis pilih arah:\n'
-                                '• BTC > H4 13 EMA → cari LONG\n'
-                                '• BTC < H4 13 EMA → cari SHORT\n\n'
+                                '• BTC > H4 9 EMA → cari LONG\n'
+                                '• BTC < H4 9 EMA → cari SHORT\n\n'
                                 'Cek log: <code>Mode:LONG/SHORT(📊EMA)</code>'
                             )
 
@@ -235,7 +235,7 @@ async def tg_send_bias_keyboard(session: aiohttp.ClientSession, chat_id: str):
                 f'Mode saat ini: <b>{current}</b>\n\n'
                 f'📈 LONG = bot hanya cari posisi LONG\n'
                 f'📉 SHORT = bot hanya cari posisi SHORT\n'
-                f'🤖 AUTO = otomatis dari BTC H4 13 EMA'
+                f'🤖 AUTO = otomatis dari BTC H4 9 EMA'
             ),
             'parse_mode': 'HTML',
             'reply_markup': json.dumps({
@@ -509,9 +509,9 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
             f"💰 Equity: ${equity:.2f}\n"
             f"⚙️ Testnet: {HL_TESTNET}\n"
             f"📊 Timeframes: {', '.join(TIMEFRAMES)}\n"
-            f"🎯 Strategy: Kalimasada v7 (BTC H4 13EMA Filter)\n"
-            f"📈 LONG: Ascending Triangle (BTC &gt; H4 13EMA)\n"
-            f"📉 SHORT: LH Rejection + Breakdown (BTC &lt; H4 13EMA)\n"
+            f"🎯 Strategy: Kalimasada v7 (BTC H4 9EMA Filter)\n"
+            f"📈 LONG: Ascending Triangle (BTC &gt; H4 9EMA)\n"
+            f"📉 SHORT: LH Rejection + Breakdown (BTC &lt; H4 9EMA)\n"
             f"📅 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
         )
 
@@ -558,9 +558,9 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
 
                  # ── Step 3: ALWAYS scan top coins for watchlist ──────
                 all_coins = await asyncio.to_thread(scanner.scan_top_volume)
-                WEB.alpha_coins = all_coins[:30]  # Cap at 30 to save memory
+                WEB.alpha_coins = all_coins[:50]  # Cap at 50 to save memory and keep dashboard clean
 
-                # ── Step 3.5: Determine trade bias (manual override or BTC H4 13 EMA) ──
+                # ── Step 3.5: Determine trade bias (manual override or BTC H4 9 EMA) ──
                 if _manual_bias:
                     btc_bias = _manual_bias
                     bias_source = 'MANUAL'
@@ -629,7 +629,7 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
                         # Remove from retry queue on success
                         retry_queue.pop(coin['bybit_symbol'], None)
 
-                        # PURE PRICE ACTION: Route based on BTC H4 13 EMA bias
+                        # PURE PRICE ACTION: Route based on BTC H4 9 EMA bias
                         for tf in TIMEFRAMES:
                             df = ohlcv_data.get(tf)
                             if df is None or len(df) < 60:
@@ -638,11 +638,11 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
                             signal = None
 
                             if btc_bias == 'LONG':
-                                # BTC > H4 13 EMA → LONG ONLY (ascending triangle bounce)
+                                # BTC > H4 9 EMA → LONG ONLY (ascending triangle bounce)
                                 signal = analyze(df, coin['symbol'], tf)
 
                             elif btc_bias == 'SHORT':
-                                # BTC < H4 13 EMA → SHORT ONLY
+                                # BTC < H4 9 EMA → SHORT ONLY
                                 # LH Short (H1 rejection dari resistance trendline)
                                 signal = analyze_lh_short(df, coin['symbol'], tf)
 
@@ -1104,7 +1104,7 @@ async def api_diagnose():
     """Run diagnose_analyze on all scanned coins and return rejection breakdown."""
     try:
         # Use the already-loaded scanner from global state
-        coins = WEB.alpha_coins[:20]  # Top 20 coins
+        coins = WEB.alpha_coins[:50]  # Diagnose top 50 coins instead of 20
         if not coins:
             return JSONResponse({'error': 'No coins scanned yet', 'scans': WEB.scans})
 

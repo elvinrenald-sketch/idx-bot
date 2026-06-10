@@ -304,13 +304,13 @@ async def tg_signal(session: aiohttp.ClientSession, signal: Dict, sizing: Dict,
     direction = signal.get('direction', 'LONG')
 
     if direction == 'SHORT':
-        fib_050 = signal.get('fib_050', 0)
-        fib_559 = signal.get('fib_559', 0)
         fib_618 = signal.get('fib_618', 0)
+        fib_702 = signal.get('fib_702', 0)
+        fib_786 = signal.get('fib_786', 0)
         sw_high = signal.get('swing_high', 0)
         sw_low = signal.get('swing_low', 0)
         touch_line = f"🔻 LH: {signal.get('hl_touches', 0)} touches\n"
-        res_line = (f"📐 Fib Zone: {fib_559:.4f} - {fib_618:.4f}\n"
+        res_line = (f"📐 Fib Zone: {fib_702:.4f} - {fib_786:.4f}\n"
                     f"⬆️ SwingH: {sw_high:.4f} | ⬇️ SwingL: {sw_low:.4f}\n")
         pct_line = f"📉 Drop: {signal.get('total_rise_pct', 0):.1f}%\n"
     else:

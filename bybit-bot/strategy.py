@@ -899,12 +899,12 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
 
     Deteksi Lower Highs → cari Swing Low setelah LH terakhir →
     tarik Fibonacci dari Swing High (LH) ke Swing Low (LL) →
-    Entry SHORT saat harga retrace ke zona Fib 0.5-0.618.
+    Entry SHORT saat harga retrace ke zona Fib 0.618-0.786.
 
     Identik dengan cara manual tarik Fibonacci di TradingView:
     - Point A = Swing High (LH terakhir, df['high'] wick)
     - Point B = Swing Low (LL setelah LH, df['low'] wick)
-    - Entry di zona retracement 50%-61.8%
+    - Entry di zona retracement 61.8%-78.6%
     """
     if df is None or len(df) < 60:
         return None
@@ -964,7 +964,7 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         # 1. Cari SWING HIGH: dari LH terdeteksi (titik puncak)
         # 2. Cari SWING LOW: lowest low SETELAH swing high (titik bottom setelah drop)
         # 3. Tarik Fibonacci dari Swing High ke Swing Low
-        # 4. Entry saat harga retrace NAIK ke zona 0.5-0.618
+        # 4. Entry saat harga retrace NAIK ke zona 0.618-0.786
         #
         # PENTING: Iterasi setiap LH dari terbaru → terlama.
         # Pakai LH dengan SWING HIGH TERTINGGI yang memberikan fib zone valid.
@@ -975,9 +975,9 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         swing_low = None
         swing_high_iloc = None
         swing_low_iloc = None
-        fib_050 = None
-        fib_559 = None
         fib_618 = None
+        fib_702 = None
+        fib_786 = None
         fib_range = None
 
         # Collect ALL valid candidates, then pick the HIGHEST swing high
@@ -1026,13 +1026,13 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
                 continue
 
             # Calculate Fib levels
-            _fib_050 = candidate_low + (_fib_range * 0.5)
-            _fib_559 = candidate_low + (_fib_range * 0.559)  # Midpoint of 0.5-0.618
             _fib_618 = candidate_low + (_fib_range * 0.618)
+            _fib_702 = candidate_low + (_fib_range * 0.702)  # Midpoint of 0.618-0.786
+            _fib_786 = candidate_low + (_fib_range * 0.786)
 
             log.debug(f"🔻 LH_SHORT {symbol} {timeframe}: valid LH[{i}] "
                       f"SwH={candidate_high:.6f} SwL={candidate_low:.6f} "
-                      f"Fib[{_fib_559:.6f}-{_fib_618:.6f}] drop={_fib_range_pct:.1f}%")
+                      f"Fib[{_fib_702:.6f}-{_fib_786:.6f}] drop={_fib_range_pct:.1f}%")
 
             # Pick the candidate with the HIGHEST swing high (regardless of price position)
             if best_candidate is None or candidate_high > best_candidate['swing_high']:
@@ -1041,9 +1041,9 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
                     'swing_high_iloc': candidate_high_idx,
                     'swing_low': candidate_low,
                     'swing_low_iloc': candidate_low_idx,
-                    'fib_050': _fib_050,
-                    'fib_559': _fib_559,
                     'fib_618': _fib_618,
+                    'fib_702': _fib_702,
+                    'fib_786': _fib_786,
                     'fib_range': _fib_range,
                 }
 
@@ -1055,51 +1055,51 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         swing_high_iloc = best_candidate['swing_high_iloc']
         swing_low = best_candidate['swing_low']
         swing_low_iloc = best_candidate['swing_low_iloc']
-        fib_050 = best_candidate['fib_050']
-        fib_559 = best_candidate['fib_559']
         fib_618 = best_candidate['fib_618']
+        fib_702 = best_candidate['fib_702']
+        fib_786 = best_candidate['fib_786']
         fib_range = best_candidate['fib_range']
         log.debug(f"🔻 LH_SHORT {symbol} {timeframe}: BEST (HIGHEST) candidate "
                   f"SwH={swing_high:.6f} SwL={swing_low:.6f} "
-                  f"Fib559={fib_559:.6f} Fib618={fib_618:.6f}")
+                  f"Fib702={fib_702:.6f} Fib786={fib_786:.6f}")
 
         # NOW check if current price is in the fib zone of the HIGHEST swing high
-        if not (fib_559 <= current_price <= fib_618):
+        if not (fib_702 <= current_price <= fib_786):
             log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: price {current_price:.6f} "
-                      f"NOT in highest SwH fib zone [{fib_559:.6f}-{fib_618:.6f}]")
+                      f"NOT in highest SwH fib zone [{fib_702:.6f}-{fib_786:.6f}]")
             return None
 
         fib_range_pct = (fib_range / swing_high) * 100
 
         # ═══ ENTRY DIRECTION: Harga HARUS masuk zona dari BAWAH (retrace) ═══
         #
-        # VALID: Harga turun ke swing low → bouncing NAIK → masuk zona 0.5-0.618 dari BAWAH
+        # VALID: Harga turun ke swing low → bouncing NAIK → masuk zona 0.618-0.786 dari BAWAH
         # INVALID: Harga di ATAS zona → TURUN melewati zona (bukan retrace!)
         #
-        # CHECK 1: BLOCK jika candle recent close di ATAS fib 0.618 → datang dari atas
-        # CHECK 2: REQUIRE minimal 1 candle recent close di BAWAH fib 0.5 → naik dari bawah
+        # CHECK 1: BLOCK jika candle recent close di ATAS fib 0.786 → datang dari atas
+        # CHECK 2: REQUIRE minimal 1 candle recent close di BAWAH fib 0.618 → naik dari bawah
 
-        # CHECK 1: BLOCK — Jika candle -2, -3, atau -4 pernah close di ATAS fib 0.618,
+        # CHECK 1: BLOCK — Jika candle -2, -3, atau -4 pernah close di ATAS fib 0.786,
         # harga TURUN dari atas melewati zona, BUKAN retrace dari bawah.
         for j in range(2, min(5, len(df))):
             past_close = float(df['close'].iloc[-j])
-            if past_close > fib_618:
+            if past_close > fib_786:
                 log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: candle -{j} close "
-                          f"{past_close:.6f} > fib_618 {fib_618:.6f} — price came FROM ABOVE")
+                          f"{past_close:.6f} > fib_786 {fib_786:.6f} — price came FROM ABOVE")
                 return None
 
-        # CHECK 2: REQUIRE — Minimal 1 dari candle -2, -3, -4 harus close di BAWAH fib 0.5.
+        # CHECK 2: REQUIRE — Minimal 1 dari candle -2, -3, -4 harus close di BAWAH fib 0.618.
         # Konfirmasi harga memang NAIK dari bawah masuk ke zona retracement.
         entered_from_below = False
         for j in range(2, min(5, len(df))):
             past_close = float(df['close'].iloc[-j])
-            if past_close < fib_050:
+            if past_close < fib_618:
                 entered_from_below = True
                 break
 
         if not entered_from_below:
             log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no candle in [-2 to -4] "
-                      f"closed below fib_050 {fib_050:.6f} — NOT entering from below")
+                      f"closed below fib_618 {fib_618:.6f} — NOT entering from below")
             return None
 
         # No pump candle
@@ -1134,10 +1134,10 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
 
         entry_type = 'LH_SHORT'
 
-        # Confidence — closer to 0.618 = higher quality retracement
+        # Confidence — closer to 0.786 = higher quality retracement
         _lh_bonus = min(25, max(0, (len(lh_indices) - 2) * 12))
         fib_position = (current_price - swing_low) / fib_range if fib_range > 0 else 0
-        _fib_bonus = 15 if fib_position >= 0.58 else 10  # Near 0.618 = better
+        _fib_bonus = 15 if fib_position >= 0.74 else 10  # Near 0.786 = better
         _precision_bonus = 15
         _confidence = min(100, 45 + _lh_bonus + _fib_bonus + _precision_bonus)
 
@@ -1169,9 +1169,9 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
             'atr': round(current_atr, 8),
             'atr_pct': round((current_atr / entry_price) * 100, 2),
             'confidence': _confidence,
-            'fib_050': round(fib_050, 8),
-            'fib_559': round(fib_559, 8),
             'fib_618': round(fib_618, 8),
+            'fib_702': round(fib_702, 8),
+            'fib_786': round(fib_786, 8),
             'swing_high': round(swing_high, 8),
             'swing_low': round(swing_low, 8),
         }
@@ -1180,7 +1180,7 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
                  f"Entry={entry_price:.6f} SL={sl_price:.6f} TP={tp_price:.6f} | "
                  f"RR=1:{actual_rr:.1f} | Conf={_confidence} | "
                  f"LH={len(lh_indices)} | "
-                 f"Fib[{fib_559:.6f}-{fib_618:.6f}] SwH={swing_high:.6f} SwL={swing_low:.6f}")
+                 f"Fib[{fib_702:.6f}-{fib_786:.6f}] SwH={swing_high:.6f} SwL={swing_low:.6f}")
 
         return signal
 

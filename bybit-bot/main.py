@@ -37,7 +37,7 @@ from config import (
 )
 import db
 from scanner import MarketScanner
-from strategy import analyze, analyze_lh_short, diagnose_analyze, is_pucuk, is_pump_candle, calc_atr, is_bullish_structure
+from strategy import analyze_hl_long, analyze_lh_short, analyze_asc_triangle_long, diagnose_analyze, is_pucuk, is_pump_candle, calc_atr, is_bullish_structure
 from risk_manager import calculate_leverage, calculate_position_size, calculate_trailing_sl, calculate_trailing_sl_short
 from executor import HyperliquidExecutor
 
@@ -303,21 +303,21 @@ async def tg_signal(session: aiohttp.ClientSession, signal: Dict, sizing: Dict,
     entry_emoji = '📐' if 'TRENDLINE' in entry_type else '🏠'
     direction = signal.get('direction', 'LONG')
 
+    fib_618 = signal.get('fib_618', 0)
+    fib_702 = signal.get('fib_702', 0)
+    fib_786 = signal.get('fib_786', 0)
+    sw_high = signal.get('swing_high', 0)
+    sw_low = signal.get('swing_low', 0)
+
     if direction == 'SHORT':
-        fib_618 = signal.get('fib_618', 0)
-        fib_702 = signal.get('fib_702', 0)
-        fib_786 = signal.get('fib_786', 0)
-        sw_high = signal.get('swing_high', 0)
-        sw_low = signal.get('swing_low', 0)
         touch_line = f"🔻 LH: {signal.get('hl_touches', 0)} touches\n"
         res_line = (f"📐 Fib Zone: {fib_702:.4f} - {fib_786:.4f}\n"
                     f"⬆️ SwingH: {sw_high:.4f} | ⬇️ SwingL: {sw_low:.4f}\n")
         pct_line = f"📉 Drop: {signal.get('total_rise_pct', 0):.1f}%\n"
     else:
-        retests = signal.get('resistance_retest_count', 0)
-        flat_res = signal.get('flat_resistance', 0)
         touch_line = f"🔺 HL: {signal.get('hl_touches', 0)} touches\n"
-        res_line = f"🏔️ Resistance: {flat_res:.4f} | Retests: {retests}x\n"
+        res_line = (f"📐 Fib Zone: {fib_786:.4f} - {fib_702:.4f}\n"
+                    f"⬇️ SwingL: {sw_low:.4f} | ⬆️ SwingH: {sw_high:.4f}\n")
         pct_line = f"📈 Rise: {signal.get('total_rise_pct', 0):.1f}%\n"
 
     text = (
@@ -638,8 +638,8 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
                             signal = None
 
                             if btc_bias == 'LONG':
-                                # BTC > H4 9 EMA → LONG ONLY (ascending triangle bounce)
-                                signal = analyze(df, coin['symbol'], tf)
+                                # BTC > H4 9 EMA → LONG ONLY (Fib retracement pullback)
+                                signal = analyze_hl_long(df, coin['symbol'], tf)
 
                             elif btc_bias == 'SHORT':
                                 # BTC < H4 9 EMA → SHORT ONLY

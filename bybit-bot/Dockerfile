@@ -2,11 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY bybit-bot/requirements.txt .
 RUN pip install --no-cache-dir --compile -r requirements.txt
 
-COPY *.py ./
-COPY templates/ ./templates/
+COPY bybit-bot/*.py ./
+COPY bybit-bot/templates/ ./templates/
 
 RUN mkdir -p /data/bybit-bot
 

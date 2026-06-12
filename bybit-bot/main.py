@@ -647,10 +647,10 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
                                 signal = analyze_lh_short(df, coin['symbol'], tf)
 
                             if signal:
-                                # Filter Minimal Confidence 55/100
-                                if signal.get('confidence', 0) < 55:
+                                # Filter Minimal Confidence 65/100 (higher quality)
+                                if signal.get('confidence', 0) < 65:
                                     log.info(f"⚠️ CONFIDENCE_REJECT {tf}: {coin['base']} "
-                                             f"{signal.get('direction','?')} score={signal['confidence']} < 55")
+                                             f"{signal.get('direction','?')} score={signal['confidence']} < 65")
                                     continue
                                 signal['bybit_symbol'] = coin['bybit_symbol']
                                 signal['volume_24h'] = coin['volume_24h']

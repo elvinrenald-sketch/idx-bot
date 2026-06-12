@@ -46,6 +46,127 @@ def calc_volume_sma(df: pd.DataFrame, period: int = 20) -> pd.Series:
     return df['volume'].rolling(window=period, min_periods=1).mean()
 
 
+def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
+    """RSI indicator — used for reversal confirmation."""
+    delta = series.diff()
+    gain = delta.where(delta > 0, 0.0).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0.0)).rolling(window=period).mean()
+    rs = gain / loss.replace(0, 1e-10)
+    return 100 - (100 / (1 + rs))
+
+
+def _is_reversal_confirmed_long(df: pd.DataFrame) -> bool:
+    """
+    Check if the current candle shows reversal confirmation for LONG entry.
+    At least ONE of these must be true:
+    - RSI < 35 (oversold at fib zone)
+    - Bullish engulfing (current close > prev open, current open < prev close)
+    - Hammer candle (lower wick > 2x body, upper wick < 20% of range)
+    - Bullish candle at zone (close > open and close near high)
+    """
+    if len(df) < 3:
+        return True
+
+    close = df['close'].iloc[-1]
+    open_ = df['open'].iloc[-1]
+    high = df['high'].iloc[-1]
+    low = df['low'].iloc[-1]
+    prev_close = df['close'].iloc[-2]
+    prev_open = df['open'].iloc[-2]
+
+    # RSI check
+    rsi = calc_rsi(df['close'], 14)
+    rsi_val = rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50
+    if rsi_val < 38:
+        return True
+
+    # Bullish engulfing
+    if close > prev_open and open_ < prev_close and close > open_:
+        return True
+
+    # Hammer candle
+    body = abs(close - open_)
+    candle_range = high - low
+    if candle_range > 0:
+        lower_wick = min(close, open_) - low
+        upper_wick = high - max(close, open_)
+        if lower_wick > body * 2 and upper_wick < candle_range * 0.25:
+            return True
+
+    # Strong bullish candle at zone (close > open, close in top 30% of range)
+    if close > open_ and candle_range > 0:
+        close_position = (close - low) / candle_range
+        if close_position > 0.7:
+            return True
+
+    return False
+
+
+def _is_reversal_confirmed_short(df: pd.DataFrame) -> bool:
+    """
+    Check if the current candle shows reversal confirmation for SHORT entry.
+    Mirror of LONG: at least ONE of these must be true:
+    - RSI > 65 (overbought at fib zone)
+    - Bearish engulfing
+    - Shooting star candle
+    - Strong bearish candle at zone
+    """
+    if len(df) < 3:
+        return True
+
+    close = df['close'].iloc[-1]
+    open_ = df['open'].iloc[-1]
+    high = df['high'].iloc[-1]
+    low = df['low'].iloc[-1]
+    prev_close = df['close'].iloc[-2]
+    prev_open = df['open'].iloc[-2]
+
+    # RSI check
+    rsi = calc_rsi(df['close'], 14)
+    rsi_val = rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50
+    if rsi_val > 62:
+        return True
+
+    # Bearish engulfing
+    if close < prev_open and open_ > prev_close and close < open_:
+        return True
+
+    # Shooting star candle
+    body = abs(close - open_)
+    candle_range = high - low
+    if candle_range > 0:
+        upper_wick = high - max(close, open_)
+        lower_wick = min(close, open_) - low
+        if upper_wick > body * 2 and lower_wick < candle_range * 0.25:
+            return True
+
+    # Strong bearish candle at zone (close < open, close in bottom 30% of range)
+    if close < open_ and candle_range > 0:
+        close_position = (low - close) / (-candle_range) if candle_range > 0 else 0
+        close_pos_pct = (high - close) / candle_range
+        if close_pos_pct > 0.7:
+            return True
+
+    return False
+
+
+def is_momentum_favorable(df: pd.DataFrame, direction: str) -> bool:
+    """Check if recent momentum supports the entry direction."""
+    if len(df) < 10:
+        return True
+
+    # 5-candle momentum
+    recent_return = (df['close'].iloc[-1] / df['close'].iloc[-5] - 1) * 100
+
+    if direction == 'LONG':
+        # For LONG: recent drop of 1-5% is good (pullback into support)
+        # But drop > 5% = momentum too strong against us
+        return -5.0 < recent_return < 1.5
+    else:
+        # For SHORT: recent rise of 1-5% is good (bounce into resistance)
+        return -1.5 < recent_return < 5.0
+
+
 # ══════════════════════════════════════════════════════════════
 # PIVOT DETECTION
 # ══════════════════════════════════════════════════════════════
@@ -1209,6 +1330,16 @@ def analyze_hl_long(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[D
             log.debug(f"🔺 HL_LONG SKIP {symbol} {timeframe}: pump candle detected")
             return None
 
+        # Reversal confirmation — current candle must show reversal signal
+        if not _is_reversal_confirmed_long(df):
+            log.debug(f"🔺 HL_LONG SKIP {symbol} {timeframe}: no reversal confirmation at fib zone")
+            return None
+
+        # Momentum filter — block entries against extreme momentum
+        if not is_momentum_favorable(df, 'LONG'):
+            log.debug(f"🔺 HL_LONG SKIP {symbol} {timeframe}: unfavorable momentum")
+            return None
+
         # ═══ SL/TP CALCULATION ═══
 
         entry_price = current_price
@@ -1509,6 +1640,16 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         # No pump candle
         if is_pump_candle(df, atr):
             log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: pump candle detected")
+            return None
+
+        # Reversal confirmation — current candle must show reversal signal
+        if not _is_reversal_confirmed_short(df):
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: no reversal confirmation at fib zone")
+            return None
+
+        # Momentum filter — block entries against extreme momentum
+        if not is_momentum_favorable(df, 'SHORT'):
+            log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: unfavorable momentum")
             return None
 
         # ═══ SL/TP CALCULATION ═══
@@ -2686,23 +2827,20 @@ def is_alpha_worthy(signal: Dict, coin_df: pd.DataFrame, btc_df: pd.DataFrame,
 
     # ── Layer 5: Confidence Score ──
     confidence = signal.get('confidence', 0)
-    if confidence >= 55:
+    if confidence >= 65:
         passed_layers += 1
     else:
-        reasons.append(f'LOW_CONFIDENCE({confidence}<55)')
+        reasons.append(f'LOW_CONFIDENCE({confidence}<65)')
 
     # ── Layer 6: BTC 4h Momentum Guard ──
-    # Jika BTC turun >-1.5% dalam 4 candle terakhir, BLOCK entry.
-    # Alasan: semua mid-small cap berkorelasi 1:1 dengan BTC jangka pendek.
-    # Ascending triangle bisa valid secara teknikal tapi tetap ditarik turun
-    # jika BTC sedang dalam downswing aktif.
+    # Relaxed: only block if BTC drops > -3.0% (was -1.5%) in 4 candles
+    # Moderate BTC dips are normal and shouldn't block valid setups
     if btc_df is not None and len(btc_df) >= 5:
         btc_4h_start = float(btc_df['close'].iloc[-5])
         btc_4h_now   = float(btc_df['close'].iloc[-1])
         btc_4h_chg   = ((btc_4h_now - btc_4h_start) / btc_4h_start) * 100
-        if btc_4h_chg < -1.5:
-            reasons.append(f'BTC_4H_DUMP({btc_4h_chg:+.1f}%<-1.5%)')
-            # Downswing BTC aktif = BLOCK semua entry, apapun pattern-nya
+        if btc_4h_chg < -3.0:
+            reasons.append(f'BTC_4H_DUMP({btc_4h_chg:+.1f}%<-3.0%)')
             return False, reasons
     else:
         btc_4h_chg = 0.0

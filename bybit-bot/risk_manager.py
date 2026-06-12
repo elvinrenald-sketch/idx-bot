@@ -9,6 +9,7 @@ from typing import Optional, Dict
 from config import (
     RISK_PER_TRADE_PCT, MIN_LEVERAGE, MAX_LEVERAGE,
     DEFAULT_RR_RATIO, MAX_OPEN_POSITIONS, MIN_NOTIONAL_USDT,
+    get_risk_pct,
 )
 
 log = logging.getLogger('risk')
@@ -88,8 +89,9 @@ def calculate_position_size(
         log.warning("Zero equity, cannot size position")
         return None
 
-    # Step 1: How much we're willing to lose
-    risk_amount = equity * (RISK_PER_TRADE_PCT / 100.0)
+    # Step 1: How much we're willing to lose (dynamic based on equity)
+    risk_pct = get_risk_pct(equity)
+    risk_amount = equity * (risk_pct / 100.0)
 
     # Step 2: SL distance as percentage (always positive)
     sl_distance_pct = abs(entry_price - sl_price) / entry_price
@@ -180,13 +182,14 @@ def calculate_trailing_sl(entry_price: float, current_price: float,
                           original_sl: float, current_sl: float) -> Optional[float]:
     """
     Trailing stop for LONG: progressively move SL UP as profit grows.
+    Optimized for RR 1:2 — wider breathing room before trailing.
 
     LONG: SL starts BELOW entry price. Profit = price rises above entry.
     1R = entry_price - original_sl (the risk distance)
     
-    Progressive stages (RR 1:1 — TP at 1.0R):
-    - At 0.5R profit → SL to breakeven (entry - tiny buffer)
-    - At 0.75R profit → SL to entry + 0.25R (lock 0.25R profit)
+    Progressive stages (RR 1:2 — TP at 2.0R):
+    - At 1.0R profit → SL to breakeven (entry - tiny buffer)
+    - At 1.5R profit → SL to entry + 0.75R (lock 0.75R profit)
     """
     r_distance = entry_price - original_sl  # 1R distance
     if r_distance <= 0:
@@ -194,10 +197,10 @@ def calculate_trailing_sl(entry_price: float, current_price: float,
 
     profit_in_r = (current_price - entry_price) / r_distance
 
-    if profit_in_r >= 0.75:
-        # Lock 0.25R profit
-        new_sl = entry_price + (r_distance * 0.25)
-    elif profit_in_r >= 0.5:
+    if profit_in_r >= 1.5:
+        # Lock 0.75R profit
+        new_sl = entry_price + (r_distance * 0.75)
+    elif profit_in_r >= 1.0:
         # Breakeven — SL at entry (tiny buffer below)
         new_sl = entry_price - (entry_price * 0.0005)
     else:
@@ -216,13 +219,14 @@ def calculate_trailing_sl_short(entry_price: float, current_price: float,
                                 original_sl: float, current_sl: float) -> Optional[float]:
     """
     Trailing stop for SHORT: progressively move SL DOWN as profit grows.
+    Optimized for RR 1:2 — wider breathing room before trailing.
 
     SHORT: SL starts ABOVE entry price. Profit = price drops below entry.
     1R = original_sl - entry_price (the risk distance)
     
-    Progressive stages (RR 1:1 — TP at 1.0R):
-    - At 0.5R profit → SL to breakeven (entry + tiny buffer)
-    - At 0.75R profit → SL to entry - 0.25R (lock 0.25R profit)
+    Progressive stages (RR 1:2 — TP at 2.0R):
+    - At 1.0R profit → SL to breakeven (entry + tiny buffer)
+    - At 1.5R profit → SL to entry - 0.75R (lock 0.75R profit)
     """
     r_distance = original_sl - entry_price  # 1R distance (positive, SL above entry)
     if r_distance <= 0:
@@ -231,17 +235,16 @@ def calculate_trailing_sl_short(entry_price: float, current_price: float,
     # For SHORT, profit = price DROP from entry
     profit_in_r = (entry_price - current_price) / r_distance
 
-    if profit_in_r >= 0.75:
-        # Lock 0.25R profit
-        new_sl = entry_price - (r_distance * 0.25)
-    elif profit_in_r >= 0.5:
+    if profit_in_r >= 1.5:
+        # Lock 0.75R profit
+        new_sl = entry_price - (r_distance * 0.75)
+    elif profit_in_r >= 1.0:
         # Breakeven — SL at entry (tiny buffer above)
         new_sl = entry_price + (entry_price * 0.0005)
     else:
         return None  # Not enough profit to trail
 
     # Only move SL DOWN (closer to profit for SHORT), never up
-    # Use <= to prevent getting stuck when SL == target
     if new_sl < current_sl:
         log.info(f"📉 TRAILING SL SHORT: {current_sl:.6f} → {new_sl:.6f} "
                  f"(profit={profit_in_r:.1f}R)")

@@ -86,28 +86,39 @@ TRIPLE_SCREEN_ENABLED  = True  # Align M15 with H1 & H4 trends
 # ══════════════════════════════════════════════════════════════
 # RISK MANAGEMENT
 # ══════════════════════════════════════════════════════════════
-RISK_PER_TRADE_PCT = 3.0     # Risiko 3% equity per trade
+RISK_PER_TRADE_PCT = 5.0     # Risiko 5% equity per trade (aggressive for small accounts)
+
+def get_risk_pct(equity: float) -> float:
+    """Dynamic risk scaling: aggressive for small accounts, conservative for large."""
+    if equity < 50:
+        return 5.0    # Aggressive growth phase
+    elif equity < 200:
+        return 4.0    # Growth phase
+    elif equity < 1000:
+        return 3.0    # Standard
+    else:
+        return 2.0    # Conservative for larger accounts
 MAX_OPEN_POSITIONS = 2       # Maksimal 2 posisi TOTAL (LONG + SHORT gabungan)
 MIN_EQUITY_FOR_TRADE = 5.5   # [NEW] Minimum equity $5.5 USDT untuk boleh trade. Jika di bawah = SKIP scan
 FAILED_SYMBOL_COOLDOWN = 10  # [NEW] Cooldown: skip simbol yang gagal selama 10 scan (~10 menit)
 MIN_LEVERAGE       = 3       # Leverage minimum
 MAX_LEVERAGE       = 10      # Leverage maksimum
-DEFAULT_RR_RATIO   = 1.0     # Risk:Reward = 1:1 (TP = SL distance)
-PARTIAL_TP_RATIO   = 0.5     # Close 25% posisi di profit 0.5R + SL → BEP
+DEFAULT_RR_RATIO   = 2.0     # Risk:Reward = 1:2 (TP = 2x SL distance)
+PARTIAL_TP_RATIO   = 1.0     # Close 25% posisi di profit 1.0R + SL → BEP
 PARTIAL_TP_PCT     = 25      # Persentase size yang diclose saat partial TP
 TRAILING_BREAKEVEN = True    # Geser SL otomatis
 
 # SL Buffer
-SL_BUFFER_PCT      = 0.3     # Tambahan 0.3% di bawah support zone untuk SL
-MIN_SL_PCT         = 2.5     # MINIMUM SL jarak 2.5% dari entry (anti-wick noise)
+SL_BUFFER_PCT      = 0.2     # Tambahan 0.2% di bawah support zone untuk SL
+MIN_SL_PCT         = 1.8     # MINIMUM SL jarak 1.8% dari entry (tighter stops)
 
 # ATR Multiplier per Timeframe
 # RR tetap 1:2 di semua TF, hanya ukuran absolut SL/TP yang menyesuaikan "napas" TF
 ATR_SL_MULT = {
-    '15m': 1.5,   # M15: napas pendek, SL tipis tapi wajar
-    '1h':  2.0,   # H1:  napas lebih panjang, SL lebih lebar
-    '4h':  2.5,   # H4:  swing trade, butuh ruang gerak lebih besar
-    '1d':  3.0,   # D1:  position trade, SL sangat lebar
+    '15m': 1.2,   # M15: napas pendek, SL tipis
+    '1h':  1.5,   # H1:  napas sedang, SL moderate
+    '4h':  2.0,   # H4:  swing trade, SL lebih lebar
+    '1d':  2.5,   # D1:  position trade, SL lebar
 }
 ATR_SL_MULT_DEFAULT = 1.5  # Fallback jika TF tidak dikenali
 
@@ -130,11 +141,11 @@ BLACKLIST_SYMBOLS  = [         # Koin yang di-skip (stablecoins, non-crypto)
 # ══════════════════════════════════════════════════════════════
 SCAN_INTERVAL_SEC     = 60     # Scan setiap 1 menit (Real-time momentum)
 POSITION_CHECK_SEC    = 60     # Cek posisi setiap 1 menit
-MAX_ALPHA_COINS       = 30     # Max koin alpha yang di-deep scan
+MAX_ALPHA_COINS       = 50     # Max koin alpha yang di-deep scan
 RATE_LIMIT_DELAY      = 0.15   # Delay antar API call (150ms) — Hyperliquid lebih toleran
 
 # Market Cap Filter (CoinGecko)
-MARKETCAP_TOP_N       = 50     # Hanya exclude top 50 (scan koin rank 51+)
+MARKETCAP_TOP_N       = 20     # Hanya exclude top 20 (scan koin rank 21+)
 MARKETCAP_CACHE_SEC   = 3600   # Cache CoinGecko data selama 1 jam
 
 # ══════════════════════════════════════════════════════════════

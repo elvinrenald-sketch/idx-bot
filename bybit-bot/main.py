@@ -171,10 +171,10 @@ async def tg_poll_updates(session: aiohttp.ClientSession):
                             _manual_bias = ''
                             save_manual_bias('')
                             reply = (
-                                '✅ <b>Mode: 🤖 AUTO (BTC H4 9 EMA)</b>\n\n'
+                                '✅ <b>Mode: 🤖 AUTO (BTC H4 13 EMA)</b>\n\n'
                                 '🔍 Bot otomatis pilih arah:\n'
-                                '• BTC > H4 9 EMA → cari LONG\n'
-                                '• BTC < H4 9 EMA → cari SHORT\n\n'
+                                '• BTC > H4 13 EMA → cari LONG\n'
+                                '• BTC < H4 13 EMA → cari SHORT\n\n'
                                 'Cek log: <code>Mode:LONG/SHORT(📊EMA)</code>'
                             )
 
@@ -235,7 +235,7 @@ async def tg_send_bias_keyboard(session: aiohttp.ClientSession, chat_id: str):
                 f'Mode saat ini: <b>{current}</b>\n\n'
                 f'📈 LONG = bot hanya cari posisi LONG\n'
                 f'📉 SHORT = bot hanya cari posisi SHORT\n'
-                f'🤖 AUTO = otomatis dari BTC H4 9 EMA'
+                f'🤖 AUTO = otomatis dari BTC H4 13 EMA'
             ),
             'parse_mode': 'HTML',
             'reply_markup': json.dumps({
@@ -304,14 +304,14 @@ async def tg_signal(session: aiohttp.ClientSession, signal: Dict, sizing: Dict,
     direction = signal.get('direction', 'LONG')
 
     fib_618 = signal.get('fib_618', 0)
-    fib_702 = signal.get('fib_702', 0)
+    fib_702 = signal.get('fib_702', 0)  # LONG only
     fib_786 = signal.get('fib_786', 0)
     sw_high = signal.get('swing_high', 0)
     sw_low = signal.get('swing_low', 0)
 
     if direction == 'SHORT':
         touch_line = f"🔻 LH: {signal.get('hl_touches', 0)} touches\n"
-        res_line = (f"📐 Fib Zone: {fib_702:.4f} - {fib_786:.4f}\n"
+        res_line = (f"📐 Fib 0.786: {fib_786:.4f}\n"
                     f"⬆️ SwingH: {sw_high:.4f} | ⬇️ SwingL: {sw_low:.4f}\n")
         pct_line = f"📉 Drop: {signal.get('total_rise_pct', 0):.1f}%\n"
     else:
@@ -509,9 +509,9 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
             f"💰 Equity: ${equity:.2f}\n"
             f"⚙️ Testnet: {HL_TESTNET}\n"
             f"📊 Timeframes: {', '.join(TIMEFRAMES)}\n"
-            f"🎯 Strategy: Kalimasada v7 (BTC H4 9EMA Filter)\n"
-            f"📈 LONG: Ascending Triangle (BTC &gt; H4 9EMA)\n"
-            f"📉 SHORT: LH Rejection + Breakdown (BTC &lt; H4 9EMA)\n"
+            f"🎯 Strategy: Kalimasada v7 (BTC H4 13EMA Filter)\n"
+            f"📈 LONG: Ascending Triangle (BTC &gt; H4 13EMA)\n"
+            f"📉 SHORT: LH Rejection + Breakdown (BTC &lt; H4 13EMA)\n"
             f"📅 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
         )
 
@@ -560,7 +560,7 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
                 all_coins = await asyncio.to_thread(scanner.scan_top_volume)
                 WEB.alpha_coins = all_coins[:50]  # Cap at 50 to save memory and keep dashboard clean
 
-                # ── Step 3.5: Determine trade bias (manual override or BTC H4 9 EMA) ──
+                # ── Step 3.5: Determine trade bias (manual override or BTC H4 13 EMA) ──
                 if _manual_bias:
                     btc_bias = _manual_bias
                     bias_source = 'MANUAL'
@@ -629,7 +629,7 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
                         # Remove from retry queue on success
                         retry_queue.pop(coin['bybit_symbol'], None)
 
-                        # PURE PRICE ACTION: Route based on BTC H4 9 EMA bias
+                        # PURE PRICE ACTION: Route based on BTC H4 13 EMA bias
                         for tf in TIMEFRAMES:
                             df = ohlcv_data.get(tf)
                             if df is None or len(df) < 60:
@@ -638,11 +638,11 @@ async def scan_loop(scanner: MarketScanner, executor: HyperliquidExecutor):
                             signal = None
 
                             if btc_bias == 'LONG':
-                                # BTC > H4 9 EMA → LONG ONLY (Fib retracement pullback)
-                                signal = analyze_hl_long(df, coin['symbol'], tf)
+                                # BTC > H4 13 EMA → LONG ONLY (Ascending Triangle pullback)
+                                signal = analyze_asc_triangle_long(df, coin['symbol'], tf)
 
                             elif btc_bias == 'SHORT':
-                                # BTC < H4 9 EMA → SHORT ONLY
+                                # BTC < H4 13 EMA → SHORT ONLY
                                 # LH Short (H1 rejection dari resistance trendline)
                                 signal = analyze_lh_short(df, coin['symbol'], tf)
 

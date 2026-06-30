@@ -586,23 +586,12 @@ def diagnose_analyze(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
     dist_pct = ((current_price - trendline_price) / trendline_price) * 100
     if dist_pct < -TRENDLINE_TOLERANCE_PCT or dist_pct > TRENDLINE_TOLERANCE_PCT:
         return f"StepB: Far from trendline ({dist_pct:.2f}% vs ±{TRENDLINE_TOLERANCE_PCT}%)"
-    res_dist = ((flat_resistance_level - current_price) / flat_resistance_level) * 100
-    if res_dist < 2.0:
-        return f"StepB: Too close to resistance ({res_dist:.2f}%<2%)"
-
-    # TAHAP C: Bounce
+    # TAHAP C: Bounce (Wick/Bullish confirmation removed by user request, keep Low check)
     if len(df) >= 2:
         ec = df.iloc[-1]
-        body = ec['close'] - ec['open']
-        rng = ec['high'] - ec['low']
-        lw = min(ec['open'], ec['close']) - ec['low']
-        is_bull = body > 0
-        has_wick = rng > 0 and (lw / rng) > 0.4
-        if not is_bull and not has_wick:
-            return f"StepC: No bounce (bull={is_bull}, wick={has_wick})"
         low_dist = ((ec['low'] - trendline_price) / trendline_price) * 100
-        if low_dist > 2.0 or low_dist < -2.0:
-            return f"StepC: Low not near trendline ({low_dist:.2f}%)"
+        if low_dist > TRENDLINE_TOLERANCE_PCT or low_dist < -TRENDLINE_TOLERANCE_PCT:
+            return f"StepC: Low not near trendline ({low_dist:.2f}% vs ±{TRENDLINE_TOLERANCE_PCT}%)"
 
     if retest_events < 2:
         return f"Retests: only {retest_events} (<2)"
@@ -851,24 +840,9 @@ def analyze_asc_triangle_long(df: pd.DataFrame, symbol: str, timeframe: str) -> 
         if trendline_distance_pct < -TRENDLINE_TOLERANCE_PCT or trendline_distance_pct > TRENDLINE_TOLERANCE_PCT:
             return None  # Terlalu jauh dari HL trendline
 
-        # Jarak ke resistance harus JAUH (minimal 2% di bawah resistance)
-        resistance_distance_pct = ((flat_resistance_level - current_price) / flat_resistance_level) * 100
-        if resistance_distance_pct < 2.0:
-            return None  # ❌ Terlalu dekat resistance
-
-        # ═══ TAHAP C: BOUNCE — Candle saat ini menunjukkan rejection di trendline ═══
+        # ═══ TAHAP C: BOUNCE — Candle saat ini dekat trendline (Wick/Bullish confirmation removed by user request, keep Low check) ═══
         if len(df) >= 2:
             entry_candle = df.iloc[-1]
-            candle_body = entry_candle['close'] - entry_candle['open']
-            candle_range = entry_candle['high'] - entry_candle['low']
-            lower_wick = min(entry_candle['open'], entry_candle['close']) - entry_candle['low']
-
-            is_bullish = candle_body > 0
-            has_wick_rejection = candle_range > 0 and (lower_wick / candle_range) > 0.4
-
-            if not is_bullish and not has_wick_rejection:
-                return None  # ❌ Tidak ada sinyal bounce di trendline
-
             # LOW candle harus DEKAT trendline (±TRENDLINE_TOLERANCE_PCT)
             candle_low = entry_candle['low']
             low_to_trendline_pct = ((candle_low - trendline_price) / trendline_price) * 100
@@ -899,10 +873,10 @@ def analyze_asc_triangle_long(df: pd.DataFrame, symbol: str, timeframe: str) -> 
         atr_mult = ATR_SL_MULT.get(timeframe, ATR_SL_MULT_DEFAULT)
         atr_sl_distance = current_atr * atr_mult
 
-        # SL: di bawah trendline support — ambil yang LEBIH KETAT (dekat ke entry)
-        # max() = pilih SL yang lebih TINGGI = lebih DEKAT = loss lebih kecil
+        # SL: di bawah trendline support — ambil yang LEBIH AMAN (jauh dari entry)
+        # min() = pilih SL yang lebih RENDAH = lebih JAUH = ruang gerak lebih lebar
         trendline_sl = trendline_price * (1 - SL_BUFFER_PCT / 100)
-        sl_price = max(trendline_sl, entry_price - atr_sl_distance)
+        sl_price = min(trendline_sl, entry_price - atr_sl_distance)
 
         # Floor: SL MINIMUM 2.5% dari entry (anti-wick noise koin low-ATR)
         min_sl_floor = entry_price * (MIN_SL_PCT / 100.0)
@@ -1214,9 +1188,13 @@ def analyze_hl_long(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[D
 
         entry_price = current_price
         current_atr = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else entry_price * 0.02
+        atr_mult = ATR_SL_MULT.get(timeframe, ATR_SL_MULT_DEFAULT)
+        atr_sl_distance = current_atr * atr_mult
 
-        # SL: di BAWAH Swing Low - buffer (mirror: SHORT SL di atas swing high)
-        sl_price = swing_low * (1 - SL_BUFFER_PCT / 100)
+        # SL: di BAWAH Swing Low - buffer — ambil yang LEBIH AMAN (jauh dari entry)
+        # min() = pilih SL yang lebih RENDAH = lebih JAUH = ruang gerak lebih lebar
+        swing_low_sl = swing_low * (1 - SL_BUFFER_PCT / 100)
+        sl_price = min(swing_low_sl, entry_price - atr_sl_distance)
 
         # Floor: SL MINIMUM 2.5% dari entry
         min_sl_floor = entry_price * (MIN_SL_PCT / 100.0)
@@ -1304,12 +1282,12 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
 
     Deteksi Lower Highs → cari Swing Low setelah LH terakhir →
     tarik Fibonacci dari Swing High (LH) ke Swing Low (LL) →
-    Entry SHORT saat harga retrace ke zona Fib 0.618-0.786.
+    Entry SHORT saat harga retrace ke level Fib 0.786 saja.
 
     Identik dengan cara manual tarik Fibonacci di TradingView:
     - Point A = Swing High (LH terakhir, df['high'] wick)
     - Point B = Swing Low (LL setelah LH, df['low'] wick)
-    - Entry di zona retracement 61.8%-78.6%
+    - Entry di level retracement 78.6% (±0.5% buffer)
     """
     if df is None or len(df) < 60:
         return None
@@ -1369,7 +1347,7 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         # 1. Cari SWING HIGH: dari LH terdeteksi (titik puncak)
         # 2. Cari SWING LOW: lowest low SETELAH swing high (titik bottom setelah drop)
         # 3. Tarik Fibonacci dari Swing High ke Swing Low
-        # 4. Entry saat harga retrace NAIK ke zona 0.618-0.786
+        # 4. Entry saat harga retrace NAIK ke level 0.786 saja
         #
         # PENTING: Iterasi setiap LH dari terbaru → terlama.
         # Pakai LH dengan SWING HIGH TERTINGGI yang memberikan fib zone valid.
@@ -1381,8 +1359,9 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         swing_high_iloc = None
         swing_low_iloc = None
         fib_618 = None
-        fib_702 = None
         fib_786 = None
+        fib_786_lo = None  # Lower bound of 0.786 buffer zone
+        fib_786_hi = None  # Upper bound of 0.786 buffer zone
         fib_range = None
 
         # Collect ALL valid candidates, then pick the HIGHEST swing high
@@ -1430,14 +1409,15 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
             if _fib_range_pct > 20.0:
                 continue
 
-            # Calculate Fib levels
+            # Calculate Fib levels — entry hanya di 0.786 dengan ±0.5% buffer
             _fib_618 = candidate_low + (_fib_range * 0.618)
-            _fib_702 = candidate_low + (_fib_range * 0.702)  # Midpoint of 0.618-0.786
             _fib_786 = candidate_low + (_fib_range * 0.786)
+            _fib_786_lo = candidate_low + (_fib_range * 0.770)  # 0.786 - 0.016 buffer bawah
+            _fib_786_hi = candidate_low + (_fib_range * 0.800)  # 0.786 + 0.014 buffer atas
 
             log.debug(f"🔻 LH_SHORT {symbol} {timeframe}: valid LH[{i}] "
                       f"SwH={candidate_high:.6f} SwL={candidate_low:.6f} "
-                      f"Fib[{_fib_702:.6f}-{_fib_786:.6f}] drop={_fib_range_pct:.1f}%")
+                      f"Fib786={_fib_786:.6f} zone[{_fib_786_lo:.6f}-{_fib_786_hi:.6f}] drop={_fib_range_pct:.1f}%")
 
             # Pick the candidate with the HIGHEST swing high (regardless of price position)
             if best_candidate is None or candidate_high > best_candidate['swing_high']:
@@ -1447,8 +1427,9 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
                     'swing_low': candidate_low,
                     'swing_low_iloc': candidate_low_idx,
                     'fib_618': _fib_618,
-                    'fib_702': _fib_702,
                     'fib_786': _fib_786,
+                    'fib_786_lo': _fib_786_lo,
+                    'fib_786_hi': _fib_786_hi,
                     'fib_range': _fib_range,
                 }
 
@@ -1461,17 +1442,18 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
         swing_low = best_candidate['swing_low']
         swing_low_iloc = best_candidate['swing_low_iloc']
         fib_618 = best_candidate['fib_618']
-        fib_702 = best_candidate['fib_702']
         fib_786 = best_candidate['fib_786']
+        fib_786_lo = best_candidate['fib_786_lo']
+        fib_786_hi = best_candidate['fib_786_hi']
         fib_range = best_candidate['fib_range']
         log.debug(f"🔻 LH_SHORT {symbol} {timeframe}: BEST (HIGHEST) candidate "
                   f"SwH={swing_high:.6f} SwL={swing_low:.6f} "
-                  f"Fib702={fib_702:.6f} Fib786={fib_786:.6f}")
+                  f"Fib786={fib_786:.6f} zone[{fib_786_lo:.6f}-{fib_786_hi:.6f}]")
 
-        # NOW check if current price is in the fib zone of the HIGHEST swing high
-        if not (fib_702 <= current_price <= fib_786):
+        # NOW check if current price is at the 0.786 fib level (±buffer)
+        if not (fib_786_lo <= current_price <= fib_786_hi):
             log.debug(f"🔻 LH_SHORT SKIP {symbol} {timeframe}: price {current_price:.6f} "
-                      f"NOT in highest SwH fib zone [{fib_702:.6f}-{fib_786:.6f}]")
+                      f"NOT at fib 0.786 zone [{fib_786_lo:.6f}-{fib_786_hi:.6f}]")
             return None
 
         fib_range_pct = (fib_range / swing_high) * 100
@@ -1516,9 +1498,13 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
 
         entry_price = current_price
         current_atr = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else entry_price * 0.02
+        atr_mult = ATR_SL_MULT.get(timeframe, ATR_SL_MULT_DEFAULT)
+        atr_sl_distance = current_atr * atr_mult
 
-        # SL: di ATAS Swing High + buffer
-        sl_price = swing_high * (1 + SL_BUFFER_PCT / 100)
+        # SL: di ATAS Swing High + buffer — ambil yang LEBIH AMAN (jauh dari entry)
+        # max() = pilih SL yang lebih TINGGI = lebih JAUH = ruang gerak lebih lebar
+        swing_high_sl = swing_high * (1 + SL_BUFFER_PCT / 100)
+        sl_price = max(swing_high_sl, entry_price + atr_sl_distance)
 
         # Floor: SL MINIMUM 2.5% dari entry
         min_sl_floor = entry_price * (MIN_SL_PCT / 100.0)
@@ -1575,7 +1561,6 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
             'atr_pct': round((current_atr / entry_price) * 100, 2),
             'confidence': _confidence,
             'fib_618': round(fib_618, 8),
-            'fib_702': round(fib_702, 8),
             'fib_786': round(fib_786, 8),
             'swing_high': round(swing_high, 8),
             'swing_low': round(swing_low, 8),
@@ -1585,7 +1570,7 @@ def analyze_lh_short(df: pd.DataFrame, symbol: str, timeframe: str) -> Optional[
                  f"Entry={entry_price:.6f} SL={sl_price:.6f} TP={tp_price:.6f} | "
                  f"RR=1:{actual_rr:.1f} | Conf={_confidence} | "
                  f"LH={len(lh_indices)} | "
-                 f"Fib[{fib_702:.6f}-{fib_786:.6f}] SwH={swing_high:.6f} SwL={swing_low:.6f}")
+                 f"Fib786={fib_786:.6f} SwH={swing_high:.6f} SwL={swing_low:.6f}")
 
         return signal
 
@@ -1772,9 +1757,10 @@ def analyze_breakdown_short(df_htf: pd.DataFrame, df_m15: pd.DataFrame,
         atr_mult = ATR_SL_MULT.get(timeframe, ATR_SL_MULT_DEFAULT)
         atr_sl_distance = current_atr * atr_mult
 
-        # SL: di ATAS trendline
+        # SL: di ATAS trendline — ambil yang LEBIH AMAN (jauh dari entry)
+        # max() = pilih SL yang lebih TINGGI = lebih JAUH = ruang gerak lebih lebar
         trendline_sl = trendline_price * (1 + SL_BUFFER_PCT / 100)
-        sl_price = min(trendline_sl, entry_price + atr_sl_distance)
+        sl_price = max(trendline_sl, entry_price + atr_sl_distance)
 
         # Floor: SL MINIMUM 2.5% dari entry (anti-wick noise koin low-ATR)
         min_sl_floor = entry_price * (MIN_SL_PCT / 100.0)
